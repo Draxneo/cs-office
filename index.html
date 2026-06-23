@@ -89,7 +89,7 @@
   <h1>Admin Console <span>· Carnes &amp; Sons</span></h1>
   <div class="who" id="who"></div>
   <span class="muted" id="cs-ver" style="margin-left:10px;font-size:12px"></span>
-  <button class="btn" id="checkupd" style="margin-left:8px;padding:6px 10px">Check for update</button>
+  <button class="btn" id="checkupd" style="margin-left:8px;padding:6px 10px">Force update</button>
   <button class="btn" id="signout" style="margin-left:8px;display:none;padding:6px 12px">Sign out</button>
 </header>
 <div id="update-banner" style="display:none;position:fixed;left:0;right:0;bottom:0;z-index:100;background:var(--grad);color:#06121f;padding:12px 18px;align-items:center;justify-content:center;gap:14px;font-weight:700;box-shadow:0 -4px 16px rgba(0,0,0,.35)">
@@ -162,7 +162,7 @@
 // SKIP_WAITING so it activates, then controllerchange reloads to the fresh version. Also polls hourly +
 // on tab refocus, and the header "Check for update" button forces a check on demand.
 (function () {
-  var VERSION = "1.0.5";
+  var VERSION = "1.0.6";
   var vEl = document.getElementById("cs-ver"); if (vEl) vEl.textContent = "v" + VERSION;
   function showUpd() { var b = document.getElementById("update-banner"); if (b) b.style.display = "flex"; }
   if (!("serviceWorker" in navigator)) return;
@@ -180,8 +180,13 @@
     document.addEventListener("visibilitychange", function () { if (!document.hidden) reg.update().catch(function () {}); });
     var chk = document.getElementById("checkupd");
     if (chk) chk.addEventListener("click", function () {
-      chk.disabled = true; chk.textContent = "Checking…";
-      reg.update().then(function () { setTimeout(function () { var pending = reg.installing || reg.waiting; chk.textContent = pending ? "Update ready ↓" : "Up to date ✓"; if (pending) showUpd(); setTimeout(function () { chk.disabled = false; chk.textContent = "Check for update"; }, 2500); }, 700); }).catch(function () { chk.disabled = false; chk.textContent = "Check for update"; });
+      // BULLETPROOF force-update: drop the service worker + every cache, then reload fresh.
+      // Guarantees the latest code regardless of any stale cache/SW state.
+      chk.disabled = true; chk.textContent = "Refreshing…";
+      Promise.resolve()
+        .then(function () { return ("serviceWorker" in navigator) ? navigator.serviceWorker.getRegistrations().then(function (rs) { return Promise.all(rs.map(function (r) { return r.unregister().catch(function () {}); })); }) : null; })
+        .then(function () { return (window.caches) ? caches.keys().then(function (ks) { return Promise.all(ks.map(function (k) { return caches.delete(k).catch(function () {}); })); }) : null; })
+        .then(function () { location.reload(); }, function () { location.reload(); });
     });
     var un = document.getElementById("update-now");
     if (un) un.addEventListener("click", function () {
