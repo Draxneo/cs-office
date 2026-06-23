@@ -598,6 +598,7 @@ function custShowTab(key) {
   body.querySelectorAll("[data-tx]").forEach((b) => b.addEventListener("click", () => { const t = document.getElementById(b.getAttribute("data-tx")); if (t) t.style.display = (t.style.display === "none" ? "block" : "none"); }));
   body.querySelectorAll("[data-goto]").forEach((b) => b.addEventListener("click", () => custShowTab(b.getAttribute("data-goto"))));
   body.querySelectorAll("[data-scaneq]").forEach((b) => b.addEventListener("click", () => custScanPhotos(b)));
+  wireZoom(body);   // photos + texted images open the fullscreen zoom/annotate viewer
 }
 
 // Read model/serial off THIS customer's Housecall job photos (equipment-photo-scan), then reload
@@ -639,8 +640,8 @@ function custTabHtml(key, d) {
   if (key === "estimates") { const es = d.estimates || []; return es.length ? es.map((e) => `<div class="card" style="padding:9px 12px;margin-bottom:7px"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><div><b>${esc(e.number || "Estimate")}</b> ${custBadge(e.status || "", e.status === "approved" ? "rgba(52,211,238,.15)" : (e.status === "declined" ? "rgba(244,63,94,.15)" : ""))} <span class="muted" style="font-size:12px">&middot; ${esc(fmtDate(e.created))}${e.top_total != null ? " &middot; up to $" + e.top_total.toLocaleString() : ""}${e.options > 1 ? " &middot; " + e.options + " options" : ""}</span></div><a href="${esc(e.hcp_url)}" target="_blank" rel="noopener" class="btn" style="padding:3px 10px;font-size:12px">Open in Housecall &#8599;</a></div></div>`).join("") : `<div class="muted">No estimates.</div>`; }
   if (key === "jobs") return d.jobs.length ? d.jobs.map((j) => `<div class="card" style="padding:9px 12px;margin-bottom:7px"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><div><b>${esc(j.job || "—")}</b> ${j.install ? custBadge("Install", "rgba(52,211,238,.15)") : ""} <span class="muted" style="font-size:12px">&middot; ${esc(fmtDate(j.date))} &middot; ${esc(j.status || "")}${j.total != null ? " &middot; $" + j.total.toLocaleString() : ""}</span></div><a href="${esc(custJobUrl(j.hcp_job_id))}" target="_blank" rel="noopener" class="btn" style="padding:3px 10px;font-size:12px">Open in Housecall &#8599;</a></div><div class="muted" style="font-size:12px;margin-top:2px">${esc(j.description || "")}</div></div>`).join("") : `<div class="muted">No jobs.</div>`;
   if (key === "calls") return d.calls.length ? d.calls.map((cl, ix) => { const tid = "cust-tx-" + ix; return `<div class="card" style="padding:9px 12px;margin-bottom:7px;font-size:13px"><div><b>${esc(cl.kind || "call")}</b> ${cl.urgency ? custBadge(cl.urgency) : ""} <span class="muted">${custWhen(cl.date)}</span></div>${cl.summary ? `<div style="margin:4px 0">${esc(cl.summary)}</div>` : ""}${cl.has_recording ? `<audio controls preload="none" src="${esc(cl.recording_stream)}" style="width:100%;max-width:340px;height:36px;margin:4px 0"></audio>` : ""}${cl.transcript ? `<button class="btn" data-tx="${tid}" style="padding:2px 9px;font-size:12px">Transcript</button><div id="${tid}" style="display:none;white-space:pre-wrap;margin-top:6px;font-size:12px;color:#cbd5e1;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:9px">${esc(cl.transcript)}</div>` : ""}</div>`; }).join("") : `<div class="muted">No calls.</div>`;
-  if (key === "texts") return `<div class="card" style="max-height:460px;overflow:auto">${d.texts.length ? d.texts.slice().reverse().map((t) => { const me = t.direction === "outbound"; const imgs = (t.media || []).map((u) => `<img src="${esc(u)}" loading="lazy" style="max-width:130px;max-height:130px;border-radius:8px;margin:5px 5px 0 0;display:inline-block"/>`).join(""); return `<div style="margin:6px 0;display:flex;${me ? "justify-content:flex-end" : ""}"><div style="max-width:80%;padding:7px 11px;border-radius:12px;font-size:13px;white-space:pre-wrap;${me ? "background:var(--grad);color:#06121f" : "background:var(--surface2);color:var(--text)"}">${esc(t.body || "")}${imgs ? "<br>" + imgs : ""}<div style="opacity:.6;font-size:10px;margin-top:3px">${custWhen(t.date)}</div></div></div>`; }).join("") : `<div class="muted">No texts.</div>`}</div>`;
-  if (key === "photos") return d._photos.length ? `<div style="display:flex;flex-wrap:wrap;gap:10px">${d._photos.map((p) => `<a href="${esc(p.url || p.u)}" target="_blank" rel="noopener" style="text-decoration:none"><div style="width:140px"><img src="${esc(p.url || p.u)}" loading="lazy" style="width:140px;height:140px;object-fit:cover;border-radius:8px;display:block;background:var(--surface2)"/><div class="muted" style="font-size:10px;margin-top:2px">${esc(p.source || "")}${p.date ? " &middot; " + esc(fmtDate(p.date)) + (p.approx ? "~" : "") : ""}</div></div></a>`).join("")}</div>` : `<div class="muted">No photos.</div>`;
+  if (key === "texts") return `<div class="card" style="max-height:460px;overflow:auto">${d.texts.length ? d.texts.slice().reverse().map((t) => { const me = t.direction === "outbound"; const imgs = (t.media || []).map((u) => `<img src="${esc(u)}" data-zoom="${esc(u)}" loading="lazy" style="max-width:130px;max-height:130px;border-radius:8px;margin:5px 5px 0 0;display:inline-block;cursor:zoom-in"/>`).join(""); return `<div style="margin:6px 0;display:flex;${me ? "justify-content:flex-end" : ""}"><div style="max-width:80%;padding:7px 11px;border-radius:12px;font-size:13px;white-space:pre-wrap;${me ? "background:var(--grad);color:#06121f" : "background:var(--surface2);color:var(--text)"}">${esc(t.body || "")}${imgs ? "<br>" + imgs : ""}<div style="opacity:.6;font-size:10px;margin-top:3px">${custWhen(t.date)}</div></div></div>`; }).join("") : `<div class="muted">No texts.</div>`}</div>`;
+  if (key === "photos") return d._photos.length ? `<div style="display:flex;flex-wrap:wrap;gap:10px">${d._photos.map((p) => { const u = p.url || p.u; return `<div style="width:140px"><img src="${esc(u)}" data-zoom="${esc(u)}" loading="lazy" style="width:140px;height:140px;object-fit:cover;border-radius:8px;display:block;background:var(--surface2);cursor:zoom-in"/><div class="muted" style="font-size:10px;margin-top:2px">${esc(p.source || "")}${p.date ? " &middot; " + esc(fmtDate(p.date)) + (p.approx ? "~" : "") : ""}</div></div>`; }).join("")}</div>` : `<div class="muted">No photos.</div>`;
   if (key === "todos") return (d.installs || []).length ? d.installs.map((i) => `<div class="card" style="padding:10px 12px;margin-bottom:7px"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><b>Install &middot; Job ${esc(i.job || "?")}</b> <a href="${esc(custJobUrl(i.hcp_job_id))}" target="_blank" rel="noopener" class="btn" style="padding:3px 10px;font-size:12px">Open &#8599;</a></div><div class="muted" style="font-size:13px;margin-top:4px">${i.done}/${i.total} steps done${i.open_steps && i.open_steps.length ? ` &middot; left: ${esc(i.open_steps.join(", "))}` : " &#9989; all done"}</div></div>`).join("") : `<div class="muted">No installs / to-dos for this customer.</div>`;
   // overview
   const lastJob = d.jobs[0], lastCall = d.calls[0], lastText = d.texts[0];
@@ -652,6 +653,101 @@ function custTabHtml(key, d) {
     ${lastText ? `<div style="margin-top:6px"><b>Last text:</b> ${custWhen(lastText.date)} (${esc(lastText.direction || "")}) &mdash; <span class="muted">${esc(String(lastText.body || "").slice(0, 100))}</span></div>` : ""}
     ${(d.installs || []).length ? `<div style="margin-top:6px"><b>Open install work:</b> ${d.installs.map((i) => "Job " + esc(i.job || "?") + " (" + i.done + "/" + i.total + ")").join(", ")}</div>` : ""}
   </div>`;
+}
+
+// ===========================================================================
+// PHOTO VIEWER — fullscreen zoom + pan, with an Annotate (markup) editor.
+// Ported from the extension comms hub so the office console can zoom into the
+// digits on a nameplate photo and mark up an image to text back out. Any image
+// with a data-zoom attribute opens this on click (wired per-view).
+// ===========================================================================
+function openLightbox(url) {
+  let ov = document.getElementById("img-lightbox");
+  if (!ov) { ov = document.createElement("div"); ov.id = "img-lightbox"; ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.9);z-index:1000;display:none;flex-direction:column;align-items:center;justify-content:center;padding:12px"; document.body.appendChild(ov); }
+  ov.innerHTML = `
+    <img id="lb-img" src="${esc(url)}" draggable="false" style="max-width:100%;max-height:calc(100% - 50px);object-fit:contain;transform-origin:0 0;cursor:zoom-in;user-select:none;-webkit-user-drag:none"/>
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <button class="btn primary" id="lb-annotate">&#9999;&#65039; Annotate</button>
+      <button class="btn" id="lb-close">Close</button>
+    </div>
+    <div class="muted" style="font-size:11px;margin-top:6px">Scroll to zoom &middot; drag to pan &middot; double-click to reset</div>`;
+  ov.style.display = "flex";
+  document.getElementById("lb-close").onclick = () => { ov.style.display = "none"; ov.innerHTML = ""; };
+  document.getElementById("lb-annotate").onclick = () => { ov.style.display = "none"; ov.innerHTML = ""; openImageEditor(url); };
+  // Mouse-wheel ZOOM (toward the cursor) + drag-to-PAN when zoomed + double-click RESET.
+  (() => {
+    const img = document.getElementById("lb-img"); if (!img) return;
+    let scale = 1, tx = 0, ty = 0, dragging = false, lastX = 0, lastY = 0;
+    const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+    const apply = () => { img.style.transform = `translate(${tx}px,${ty}px) scale(${scale})`; img.style.cursor = scale > 1 ? "grab" : "zoom-in"; };
+    img.addEventListener("wheel", (e) => {
+      e.preventDefault();
+      const r = img.getBoundingClientRect();
+      const mx = e.clientX - r.left, my = e.clientY - r.top;
+      const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+      const ns = clamp(scale * factor, 1, 8), rf = ns / scale;
+      if (ns === 1) { scale = 1; tx = 0; ty = 0; } else { tx -= mx * (rf - 1); ty -= my * (rf - 1); scale = ns; }
+      apply();
+    }, { passive: false });
+    img.addEventListener("mousedown", (e) => { if (scale <= 1) return; dragging = true; lastX = e.clientX; lastY = e.clientY; img.style.cursor = "grabbing"; e.preventDefault(); });
+    img.addEventListener("dblclick", (e) => { e.preventDefault(); scale = 1; tx = 0; ty = 0; apply(); });
+    ov.onmousemove = (e) => { if (!dragging) return; tx += e.clientX - lastX; ty += e.clientY - lastY; lastX = e.clientX; lastY = e.clientY; apply(); };
+    ov.onmouseup = () => { if (dragging) { dragging = false; apply(); } };
+  })();
+}
+
+// Draw-on-photo editor: brush colors, size, undo/clear, then Copy (clipboard) or Save (download).
+// Pure client-side canvas. crossOrigin="anonymous" lets us export when the host sends CORS headers
+// (Supabase storage does; some HCP S3 links may taint the canvas -> Copy/Save fail gracefully).
+function openImageEditor(url) {
+  let ov = document.getElementById("img-editor");
+  if (!ov) { ov = document.createElement("div"); ov.id = "img-editor"; ov.style.cssText = "position:fixed;inset:0;background:#111;z-index:1001;display:flex;flex-direction:column"; document.body.appendChild(ov); }
+  ov.innerHTML = `
+    <div style="display:flex;gap:6px;align-items:center;padding:8px;background:#000;flex-wrap:wrap">
+      <span id="ed-colors" style="display:flex;gap:4px"></span>
+      <input id="ed-size" type="range" min="2" max="22" value="6" title="Brush size" style="width:70px"/>
+      <button class="btn" id="ed-undo">Undo</button>
+      <button class="btn" id="ed-clear">Clear</button>
+      <span style="flex:1"></span>
+      <button class="btn" id="ed-copy">Copy</button>
+      <button class="btn primary" id="ed-save">Save</button>
+      <button class="btn" id="ed-close">Close</button>
+    </div>
+    <div style="flex:1;overflow:auto;display:flex;align-items:center;justify-content:center;background:#222;padding:8px">
+      <canvas id="ed-canvas" style="max-width:100%;max-height:100%;touch-action:none;background:#fff;border-radius:4px"></canvas>
+    </div>
+    <div id="ed-status" style="padding:4px 8px;background:#000;color:#9aa;font-size:11px"></div>`;
+  ov.style.display = "flex";
+  const canvas = document.getElementById("ed-canvas");
+  const ctx = canvas.getContext("2d");
+  const status = (t) => { const s = document.getElementById("ed-status"); if (s) s.textContent = t; };
+  const colors = ["#ff3b30", "#ffcc00", "#34c759", "#0a84ff", "#ffffff", "#000000"];
+  let color = colors[0], size = 6;
+  const cw = document.getElementById("ed-colors");
+  colors.forEach((c) => { const b = document.createElement("button"); b.style.cssText = `width:22px;height:22px;border-radius:50%;border:2px solid #fff;background:${c};cursor:pointer;padding:0`; b.onclick = () => { color = c; }; cw.appendChild(b); });
+  document.getElementById("ed-size").oninput = (e) => { size = +e.target.value; };
+  const undo = [];
+  const img = new Image();
+  img.crossOrigin = "anonymous";
+  img.onload = () => { const max = 1600; let w = img.naturalWidth || 800, h = img.naturalHeight || 600; const sc = Math.min(1, max / Math.max(w, h)); w = Math.round(w * sc); h = Math.round(h * sc); canvas.width = w; canvas.height = h; ctx.drawImage(img, 0, 0, w, h); };
+  img.onerror = () => status("Couldn't load the image for editing.");
+  img.src = url;
+  const pos = (e) => { const r = canvas.getBoundingClientRect(); return { x: (e.clientX - r.left) * (canvas.width / r.width), y: (e.clientY - r.top) * (canvas.height / r.height) }; };
+  let drawing = false, last = null;
+  canvas.addEventListener("pointerdown", (e) => { e.preventDefault(); try { canvas.setPointerCapture(e.pointerId); } catch (_) {} if (canvas.width) { undo.push(ctx.getImageData(0, 0, canvas.width, canvas.height)); if (undo.length > 20) undo.shift(); } drawing = true; last = pos(e); });
+  canvas.addEventListener("pointermove", (e) => { if (!drawing) return; e.preventDefault(); const p = pos(e); ctx.strokeStyle = color; ctx.lineWidth = size; ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.beginPath(); ctx.moveTo(last.x, last.y); ctx.lineTo(p.x, p.y); ctx.stroke(); last = p; });
+  canvas.addEventListener("pointerup", () => { drawing = false; });
+  canvas.addEventListener("pointercancel", () => { drawing = false; });
+  document.getElementById("ed-undo").onclick = () => { const s = undo.pop(); if (s) ctx.putImageData(s, 0, 0); };
+  document.getElementById("ed-clear").onclick = () => { if (canvas.width) undo.push(ctx.getImageData(0, 0, canvas.width, canvas.height)); ctx.drawImage(img, 0, 0, canvas.width, canvas.height); };
+  document.getElementById("ed-close").onclick = () => { ov.style.display = "none"; ov.innerHTML = ""; };
+  document.getElementById("ed-save").onclick = () => { try { canvas.toBlob((blob) => { const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "annotated.png"; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000); status("Saved annotated.png to your downloads."); }, "image/png"); } catch (e) { status("Save failed (image may be protected)."); } };
+  document.getElementById("ed-copy").onclick = () => { try { canvas.toBlob(async (blob) => { try { await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]); status("Copied — paste it into a text/email."); } catch (_) { status("Clipboard copy not available here — use Save."); } }, "image/png"); } catch (e) { status("Copy failed."); } };
+}
+// Wire every [data-zoom] image inside a container to open the viewer.
+function wireZoom(container) {
+  if (!container) return;
+  container.querySelectorAll("[data-zoom]").forEach((img) => img.addEventListener("click", () => openLightbox(img.getAttribute("data-zoom"))));
 }
 
 function renderDashboard() {
@@ -2084,7 +2180,7 @@ async function renderPhotos() {
 
   const kindIcon = (k) => ({ image: "&#128444;", video: "&#127916;", audio: "&#127897;", pdf: "&#128196;", vcard: "&#128100;", doc: "&#128195;" }[k] || "&#128206;");
   const preview = (p) => {
-    if (p.kind === "image") return `<a href="${esc(p.media_url)}" target="_blank" rel="noopener"><img src="${esc(p.media_url)}" loading="lazy" style="width:100%;height:130px;object-fit:cover;border-radius:6px;background:var(--line)"/></a>`;
+    if (p.kind === "image") return `<img src="${esc(p.media_url)}" data-zoom="${esc(p.media_url)}" loading="lazy" style="width:100%;height:130px;object-fit:cover;border-radius:6px;background:var(--line);cursor:zoom-in"/>`;
     return `<a href="${esc(p.media_url)}" target="_blank" rel="noopener" style="display:block"><div style="width:100%;height:130px;border-radius:6px;background:var(--line);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px"><div style="font-size:34px">${kindIcon(p.kind)}</div><div class="muted" style="font-size:10px;max-width:92%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.filename || p.kind || "file")}</div></div></a>`;
   };
 
@@ -2141,6 +2237,7 @@ async function renderPhotos() {
     // wire the manual attach-by-name buttons
     const wireManual = () => grid.querySelectorAll("button[data-file]").forEach((b) => { b.onclick = () => attachFlow(d.photos[+b.dataset.file], b, load); });
     wireManual();
+    wireZoom(grid);   // image thumbnails open the fullscreen zoom/annotate viewer
 
     // AUTO-SUGGEST: for unfiled cards (cap 30 to limit HCP calls), fetch the likely job and surface a 1-click confirm
     const unfiled = d.photos.map((p, i) => ({ p, i })).filter((x) => !x.p.filed).slice(0, 30);
