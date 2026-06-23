@@ -378,7 +378,7 @@ function renderDashboard() {
     <div class="tiles">${dashTile("margins", "📊", "Pricing", "Profit per matchup — cost+tax vs your live sell price; edit prices")}${dashTile("repairtiers", "🔧", "Repair tiers", "Repair level pricing the presentation app + brain use")}${dashTile("finance", "💳", "Financing", "Monthly-payment calculator + plans")}${dashTile("lineitems", "🧾", "Booking line items", "Default charges per booking type")}${dashTile("membership", "⭐", "Comfort Club", "Membership stats + tag sync")}</div>
     <div class="tilegroup">People</div>
     <div class="tiles">${dashTile("installtodo", "&#9989;", "Install To-Do", "Quick list of everything still outstanding across your installs")}${dashTile("installs", "&#127959;", "Installs", "Track every install — equipment, permit, QC, walkthrough, inspection, CPS rebate, warranty")}</div>
-    <div class="tiles">${dashTile("team", "👷", "Team", "Technicians + phone re-sync")}</div>
+    <div class="tiles">${dashTile("team", "👷", "Technicians", "Your tech roster + re-sync their phone numbers from Housecall")}</div>
     <div class="tilegroup">System</div>
     <div class="tiles">${dashTile("tools", "🧰", "Claude's tools", "Everything the AI can do")}${dashTile("cleanup", "🧹", "Cleanup", "Suggested old data to prune")}${dashTile("health", "&#10084;", "Health", "Heartbeat + recent errors")}${dashTile("photos", "&#128247;", "Photos", "Every texted-in photo, by date")}</div>
     <div class="tilegroup">Work in progress</div>
@@ -1692,7 +1692,7 @@ async function runMem(action, btnId, busy) {
 // ---------- Team ----------
 async function renderTeam() {
   const m = $("main");
-  m.innerHTML = `<h2 class="sec">Team</h2><p class="sub">Loading…</p>`;
+  m.innerHTML = `<h2 class="sec">Technicians</h2><p class="sub">Loading…</p>`;
   const d = await hub("employees");
   paintTeam(d.employees || []);
 }
