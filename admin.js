@@ -438,15 +438,23 @@ async function renderCustomers() {
   const m = $("main");
   let az = "";
   for (let i = 65; i <= 90; i++) { const L = String.fromCharCode(i); az += `<button data-letter="${L}" style="padding:5px 9px;min-width:30px;border:1px solid var(--line2);background:var(--surface2);color:var(--text);border-radius:7px;cursor:pointer;font:inherit;font-size:12px;font-weight:600">${L}</button>`; }
+  const chip = (jq, label) => `<button class="btn" data-jq='${jq}' style="padding:5px 10px;font-size:12px">${label}</button>`;
   m.innerHTML = `<h2 class="sec">Customers &#128100;</h2>
-    <p class="sub">Your recently-touched customers are below &mdash; just tap one. Or jump by letter, or search by name/phone. Each opens their full record (profile, jobs, calls + recordings, texts + photos).</p>
-    <div class="saverow" style="gap:8px;flex-wrap:nowrap"><input id="cust-q" type="text" placeholder="Search by name or phone&#8230;" style="flex:1" autocomplete="off"/><button class="btn primary" id="cust-search">Search</button></div>
+    <p class="sub">Recently-touched customers load below &mdash; tap one. Or <b>ask</b> for jobs ("installs last week", "service calls last month"), jump by letter, or search a name/phone. Job results deep-link into Housecall.</p>
+    <div class="saverow" style="gap:8px;flex-wrap:nowrap"><input id="cust-q" type="text" placeholder='Ask: "installs last week" &mdash; or a name / phone&#8230;' style="flex:1" autocomplete="off"/><button class="btn primary" id="cust-search">Go</button></div>
+    <div id="cust-chips" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">
+      ${chip('{"kind":"install","status":"completed","range":"7"}', "Installs &middot; last 7 days")}
+      ${chip('{"kind":"service","status":"completed","range":"7"}', "Service &middot; last 7 days")}
+      ${chip('{"kind":"install","status":"completed","range":"month"}', "Installs &middot; this month")}
+      ${chip('{"kind":"any","status":"scheduled","range":"week"}', "Scheduled &middot; this week")}
+    </div>
     <div id="cust-az" style="display:flex;flex-wrap:wrap;gap:4px;margin-top:10px">${az}</div>
     <div id="cust-results" style="margin-top:12px"></div>
     <div id="cust-detail" style="margin-top:12px"></div>`;
   const go = () => custSearch($("cust-q").value);
   $("cust-search").addEventListener("click", go);
   $("cust-q").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); go(); } });
+  $("cust-chips").querySelectorAll("[data-jq]").forEach((b) => b.addEventListener("click", () => { const cfg = JSON.parse(b.getAttribute("data-jq")); const dr = csRangeDates(cfg.range); custJobsQuery({ kind: cfg.kind, status: cfg.status, from: dr.from, to: dr.to, label: b.textContent.trim() }); }));
   $("cust-az").querySelectorAll("[data-letter]").forEach((b) => b.addEventListener("click", () => custByLetter(b.getAttribute("data-letter"))));
   custLoadRecent();
 }
@@ -478,14 +486,70 @@ async function custByLetter(L) {
   custRenderList((d && d.customers) || [], "Customers — " + L, false);
 }
 
+// turn a date-range keyword into from/to (YYYY-MM-DD)
+function csRangeDates(range) {
+  const now = new Date(); const fmt = (d) => d.toISOString().slice(0, 10);
+  if (range === "7") { const s = new Date(now); s.setDate(now.getDate() - 7); return { from: fmt(s), to: fmt(now) }; }
+  if (range === "week") { const e = new Date(now); const mon = new Date(e); mon.setDate(e.getDate() - ((e.getDay() + 6) % 7)); return { from: fmt(mon), to: fmt(now) }; }
+  if (range === "month") { return { from: fmt(new Date(now.getFullYear(), now.getMonth(), 1)), to: fmt(now) }; }
+  if (range === "lastmonth") { return { from: fmt(new Date(now.getFullYear(), now.getMonth() - 1, 1)), to: fmt(new Date(now.getFullYear(), now.getMonth(), 0)) }; }
+  if (range === "today") { return { from: fmt(now), to: fmt(now) }; }
+  return { from: null, to: null };
+}
+
+// understand a plain-language ask like "installs last week" / "service calls last month"
+function parseJobAsk(text) {
+  const t = (text || "").toLowerCase();
+  let kind = "any";
+  if (/\binstall/.test(t)) kind = "install";
+  else if (/\bservice|repair|maintenance|tune|fix\b/.test(t)) kind = "service";
+  let status = "any";
+  if (/\b(completed|installed|did|finished|done)\b/.test(t)) status = "completed";
+  else if (/\b(scheduled|upcoming|booked)\b/.test(t)) status = "scheduled";
+  let from = null, to = null, dr = null;
+  if (/last week/.test(t)) { const now = new Date(); const e = new Date(now); const monThis = new Date(e); monThis.setDate(e.getDate() - ((e.getDay() + 6) % 7)); const monLast = new Date(monThis); monLast.setDate(monThis.getDate() - 7); const sunLast = new Date(monThis); sunLast.setDate(monThis.getDate() - 1); const f = (d) => d.toISOString().slice(0, 10); from = f(monLast); to = f(sunLast); }
+  else if (/this week/.test(t)) dr = "week";
+  else if (/this month/.test(t)) dr = "month";
+  else if (/last month/.test(t)) dr = "lastmonth";
+  else if (/today/.test(t)) dr = "today";
+  else { const m = t.match(/last (\d+) days?/); if (m) { const now = new Date(); const s = new Date(now); s.setDate(now.getDate() - (+m[1])); from = s.toISOString().slice(0, 10); to = now.toISOString().slice(0, 10); } }
+  if (dr) { const d = csRangeDates(dr); from = d.from; to = d.to; }
+  return { kind, status, from, to, isJobAsk: kind !== "any" || from != null };
+}
+
 async function custSearch(q) {
   q = (q || "").trim();
   const r = $("cust-results"); if (!r) return;
   $("cust-detail").innerHTML = "";
-  if (q.length < 2) { custLoadRecent(); return; }   // empty search -> back to the recent list
+  if (q.length < 2) { custLoadRecent(); return; }   // empty -> back to the recent list
+  const p = parseJobAsk(q);
+  if (p.isJobAsk) { custJobsQuery({ kind: p.kind, status: p.status, from: p.from, to: p.to, label: '“' + q + '”' }); return; }
   r.innerHTML = `<div class="muted">Searching&#8230;</div>`;
   const d = await custApi("search", { q });
   custRenderList((d && d.customers) || [], `Results for "${q}"`, false);
+}
+
+async function custJobsQuery(opts) {
+  const r = $("cust-results"); if (!r) return;
+  $("cust-detail").innerHTML = "";
+  r.innerHTML = `<div class="muted">Pulling jobs&#8230;</div>`;
+  const d = await custApi("jobs_query", { kind: opts.kind, status: opts.status, from: opts.from, to: opts.to });
+  if (!d || !d.ok) { r.innerHTML = `<div class="card"><div class="muted">${esc((d && d.error) || "Couldn't run that.")}</div></div>`; return; }
+  custRenderJobs(d.jobs || [], opts.label || "Jobs");
+}
+
+function custRenderJobs(jobs, label) {
+  const r = $("cust-results"); if (!r) return;
+  const head = `<div class="muted" style="margin:2px 0 8px">${esc(label)}${jobs.length ? " &middot; " + jobs.length : ""}</div>`;
+  if (!jobs.length) { r.innerHTML = head + `<div class="card"><div class="muted">No jobs match.</div></div>`; return; }
+  r.innerHTML = head + jobs.map((j) => `<div class="card" style="padding:9px 12px;margin-bottom:7px">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+        <div><strong data-cust="${esc(j.customer_id || "")}" style="cursor:pointer;text-decoration:underline">${esc(j.customer || "(unknown)")}</strong> ${j.install ? custBadge("Install", "rgba(52,211,238,.15)") : ""} <span class="muted" style="font-size:12px">&middot; Job ${esc(j.job || "?")} &middot; ${esc(j.date || "")}${j.total != null ? " &middot; $" + j.total.toLocaleString() : ""}</span></div>
+        <a href="${esc(j.hcp_url)}" target="_blank" rel="noopener" class="btn" style="padding:3px 10px;font-size:12px">Open in Housecall &#8599;</a>
+      </div>
+      <div class="muted" style="font-size:12px;margin-top:2px">${esc(j.description || "")}</div>
+    </div>`).join("");
+  r.querySelectorAll("[data-cust]").forEach((el) => el.addEventListener("click", () => { const id = el.getAttribute("data-cust"); if (id) custOpen(id); }));
 }
 
 async function custOpen(id) {
