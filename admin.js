@@ -118,6 +118,7 @@ function navTo(pane) { document.querySelectorAll("nav.side button").forEach((b) 
 
 function render(pane) {
   if (pane === "dashboard") return renderDashboard();
+  if (pane === "claude") return renderOfficeChat();
   if (pane === "ivr") return renderIvr();
   if (pane === "autosms") return renderAutoSms();
   if (pane === "lineitems") return renderLineItems();
@@ -364,6 +365,69 @@ async function renderAutoSms() {
 // ---- Dashboard (landing) — overview + grouped quick-access to every section ----
 function dashTile(pane, ic, t, d) { return `<button class="tile" data-go="${pane}"><div class="ic">${ic}</div><div class="t">${t}</div><div class="d">${d}</div></button>`; }
 function statChip(color, label) { return `<span class="chiplive"><span class="dot2" style="background:${color}"></span>${esc(label)}</span>`; }
+// ---- Claude (Office) — the OFFICE brain. Talks to claude-chat with surface:'office', so the backend
+// hands it ONLY the office toolbox (install tracker, compliance, forwarding, + future pricing/rebate/IVR
+// tools) — completely separate from the dispatch phone assistant. Same staff token = same identity/role. ----
+let officeChat = [];   // [{role:'user'|'assistant', content}]
+let officeBusy = false;
+const OFFICE_CHIP_HINT = "UI: if your reply asks me to confirm or choose, end with ONE final line exactly like '::CHIPS:: A | B | C' (2-4 short tap options, the literal text to send). Omit it for plain informational replies.";
+
+function renderOfficeChat() {
+  const m = $("main");
+  m.innerHTML = `<h2 class="sec">Claude &#129302; <span class="muted" style="font-size:13px;font-weight:500">· Office assistant</span></h2>
+    <p class="sub">Ask about installs, jobs, customers, rebates, and compliance. This is your OFFICE assistant — separate from the phone/dispatch assistant in the Chrome extension.</p>
+    <div id="oc-scroll" style="border:1px solid var(--line);border-radius:12px;padding:14px;min-height:300px;max-height:56vh;overflow:auto;background:var(--surface)"></div>
+    <div class="saverow" style="margin-top:10px;gap:8px;flex-wrap:nowrap">
+      <input id="oc-input" type="text" placeholder="Ask the office assistant…" style="flex:1" autocomplete="off"/>
+      <button class="btn primary" id="oc-send">Send</button>
+    </div>
+    <div id="oc-chips" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px"></div>`;
+  paintOfficeChat(false);
+  $("oc-send").addEventListener("click", () => sendOfficeChat($("oc-input").value));
+  $("oc-input").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); sendOfficeChat($("oc-input").value); } });
+  $("oc-input").focus();
+}
+
+function paintOfficeChat(thinking) {
+  const s = $("oc-scroll"); if (!s) return;
+  let html = officeChat.map((mm) => {
+    const me = mm.role === "user";
+    return `<div style="margin:7px 0;display:flex;${me ? "justify-content:flex-end" : ""}">
+      <div style="max-width:82%;padding:9px 13px;border-radius:13px;white-space:pre-wrap;line-height:1.45;${me ? "background:var(--grad);color:#06121f;font-weight:500" : "background:var(--surface2);color:var(--text)"}">${esc(mm.content)}</div></div>`;
+  }).join("");
+  if (!officeChat.length) html = `<div class="muted">Try: "which installs still need permits?", "what's left on the Rhonda Freeman install?", or "run the jurisdiction check on job 8673".</div>`;
+  if (thinking) html += `<div class="muted" style="margin:7px 0">Claude is thinking&#8230;</div>`;
+  s.innerHTML = html;
+  s.scrollTop = s.scrollHeight;
+}
+
+async function sendOfficeChat(text) {
+  text = (text || "").trim();
+  if (!text || officeBusy) return;
+  officeBusy = true;
+  $("oc-input").value = "";
+  $("oc-chips").innerHTML = "";
+  officeChat.push({ role: "user", content: text });
+  paintOfficeChat(true);
+  let reply = "(no response)";
+  try {
+    // surface:'office' => backend scopes the toolbox to the office set. token => identity + admin role.
+    const r = await api("claude-chat", { token: TOKEN, surface: "office", pageContext: OFFICE_CHIP_HINT, messages: officeChat.map((x) => ({ role: x.role, content: x.content })) });
+    reply = (r && (r.reply || r.error)) || "(no response)";
+  } catch (e) { reply = "Network error — try again."; }
+  let chips = [];
+  const cm = String(reply).match(/^\s*::CHIPS::\s*(.+)$/m);
+  if (cm) { chips = cm[1].split("|").map((s) => s.trim()).filter(Boolean).slice(0, 4); reply = String(reply).replace(cm[0], "").trim(); }
+  officeChat.push({ role: "assistant", content: reply });
+  officeBusy = false;
+  paintOfficeChat(false);
+  const cw = $("oc-chips");
+  if (cw && chips.length) {
+    cw.innerHTML = chips.map((c) => `<button class="btn" data-chip="${esc(c)}">${esc(c)}</button>`).join("");
+    cw.querySelectorAll("[data-chip]").forEach((b) => b.addEventListener("click", () => sendOfficeChat(b.getAttribute("data-chip"))));
+  }
+}
+
 function renderDashboard() {
   const main = $("main");
   const name = String(($("who").textContent || "").split("·")[0] || "").trim() || "there";
@@ -377,6 +441,7 @@ function renderDashboard() {
     <div class="tilegroup">Sales &amp; money</div>
     <div class="tiles">${dashTile("margins", "📊", "Pricing", "Profit per matchup — cost+tax vs your live sell price; edit prices")}${dashTile("repairtiers", "🔧", "Repair tiers", "Repair level pricing the presentation app + brain use")}${dashTile("finance", "💳", "Financing", "Monthly-payment calculator + plans")}${dashTile("lineitems", "🧾", "Booking line items", "Default charges per booking type")}${dashTile("membership", "⭐", "Comfort Club", "Membership stats + tag sync")}</div>
     <div class="tilegroup">People</div>
+    <div class="tiles">${dashTile("claude", "&#129302;", "Claude (Office)", "Ask the office assistant — installs, jobs, customers, rebates, compliance")}</div>
     <div class="tiles">${dashTile("installtodo", "&#9989;", "Install To-Do", "Quick list of everything still outstanding across your installs")}${dashTile("installs", "&#127959;", "Installs", "Track every install — equipment, permit, QC, walkthrough, inspection, CPS rebate, warranty")}</div>
     <div class="tiles">${dashTile("team", "👷", "Technicians", "Your tech roster + re-sync their phone numbers from Housecall")}</div>
     <div class="tilegroup">System</div>
