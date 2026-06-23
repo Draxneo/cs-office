@@ -1,7 +1,7 @@
 // Carnes & Sons Office Console — service worker. Makes the console installable as a desktop app
 // and gives a fast/offline shell. Network-first for same-origin GETs only; API calls to Supabase
 // (cross-origin) are NOT touched, so the console always talks live to the backend.
-var V = '1.0.7';
+var V = '1.0.8';
 var CACHE = 'csoffice-' + V;
 var CORE = ['index.html', 'admin.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png'];
 self.addEventListener('install', function (e) {
@@ -22,7 +22,9 @@ self.addEventListener('fetch', function (e) {
   var u = new URL(req.url);
   if (u.origin !== location.origin) return;         // leave cross-origin (Supabase API) alone
   e.respondWith(
-    fetch(req).then(function (r) {
+    // cache:"no-store" => bypass the BROWSER HTTP cache so a stale GitHub-Pages-cached admin.js/index.html
+    // can never be served. This was the real cause of "updates not reaching me". Network-first + no-store.
+    fetch(req, { cache: "no-store" }).then(function (r) {
       if (r && r.status === 200 && r.type === 'basic') { var cp = r.clone(); caches.open(CACHE).then(function (c) { c.put(req, cp); }); }
       return r;
     }).catch(function () { return caches.match(req).then(function (m) { return m || caches.match('index.html'); }); })
