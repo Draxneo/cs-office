@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Carnes &amp; Sons — Admin Console</title>
+<style>
+  :root{--bg:#0b1120;--surface:#121a2b;--surface2:#1a2436;--line:#26324a;--line2:#374a66;--text:#e8eef7;--muted:#9fb0c7;--faint:#5f7187;--accent:#34d3ee;--grad:linear-gradient(135deg,#22d3ee,#3b82f6);--danger:#f43f5e;--warn:#fbbf24;--success:#34d399}
+  *{box-sizing:border-box}
+  body{margin:0;font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:var(--text);background:var(--bg)}
+  a{color:var(--accent)}
+  header.top{display:flex;align-items:center;gap:12px;padding:13px 22px;border-bottom:1px solid var(--line);background:rgba(11,17,32,.92);backdrop-filter:blur(8px);position:sticky;top:0;z-index:5}
+  .logo{width:34px;height:34px;border-radius:10px;background:var(--grad);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:12px;color:#06121f;box-shadow:0 4px 14px rgba(34,211,238,.3)}
+  header.top h1{font-size:16px;margin:0;font-weight:700;letter-spacing:.2px}
+  header.top h1 span{color:var(--faint);font-weight:500}
+  header.top .who{margin-left:auto;color:var(--muted);font-size:13px}
+  .wrap{display:flex;min-height:calc(100vh - 60px)}
+  nav.side{width:224px;border-right:1px solid var(--line);padding:12px 10px 26px;background:var(--surface);flex:none}
+  .navgroup{font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--faint);font-weight:700;padding:16px 12px 5px}
+  nav.side button{position:relative;display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:none;border:none;color:var(--muted);font:inherit;font-size:13.5px;padding:9px 12px;border-radius:9px;cursor:pointer;margin-bottom:2px}
+  nav.side button:hover{background:var(--surface2);color:var(--text)}
+  nav.side button.active{background:rgba(52,211,238,.12);color:var(--accent);font-weight:600}
+  nav.side button.active::before{content:"";position:absolute;left:-10px;top:7px;bottom:7px;width:3px;border-radius:3px;background:var(--accent)}
+  main{flex:1;padding:24px 28px;max-width:940px}
+  h2.sec{font-size:21px;margin:0 0 4px;font-weight:800;letter-spacing:-.2px}
+  .sub{color:var(--muted);font-size:13px;margin:0 0 18px;max-width:640px}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin-bottom:16px}
+  .card h3{margin:0 0 12px;font-size:15px}
+  label{display:block;font-size:12px;color:var(--muted);margin:10px 0 4px;font-weight:600}
+  input[type=text],textarea,select{width:100%;background:var(--surface2);border:1px solid var(--line2);border-radius:9px;color:var(--text);padding:9px 11px;font:inherit;font-size:14px}
+  textarea{min-height:78px;resize:vertical;line-height:1.45}
+  input:focus,textarea:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px;border-color:transparent}
+  .row2{display:flex;gap:12px;flex-wrap:wrap}.row2>div{flex:1;min-width:200px}
+  .btn{display:inline-flex;align-items:center;gap:7px;padding:9px 15px;border-radius:10px;border:1px solid var(--line2);background:var(--surface2);color:var(--text);font:inherit;font-weight:600;font-size:13px;cursor:pointer}
+  .btn:hover{background:var(--line)}
+  .btn.primary{background:var(--grad);color:#06121f;border-color:transparent;font-weight:800;box-shadow:0 3px 12px rgba(34,211,238,.25)}
+  .btn[disabled]{opacity:.5;cursor:not-allowed}
+  .toggle{display:inline-flex;gap:0;border:1px solid var(--line2);border-radius:9px;overflow:hidden}
+  .toggle button{padding:8px 14px;background:var(--surface2);border:none;color:var(--muted);font:inherit;font-weight:600;cursor:pointer}
+  .toggle button.on{background:var(--accent);color:#06121f}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line)}
+  th{color:var(--faint);font-size:11px;text-transform:uppercase;letter-spacing:.05em}
+  .pill{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px;background:var(--surface2);color:var(--muted)}
+  .pill.ok{background:rgba(52,211,238,.15);color:var(--accent)}
+  .pill.tech{background:rgba(52,211,238,.12);color:#67e8f9}
+  .muted{color:var(--muted)}.faint{color:var(--faint)}
+  .out{margin-top:10px;font-size:12px;color:var(--muted);white-space:pre-wrap;background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:9px 11px;display:none}
+  .out.show{display:block}
+  .saverow{display:flex;align-items:center;gap:12px;margin-top:14px;flex-wrap:wrap}
+  .saved{color:var(--success);font-size:13px;opacity:0;transition:opacity .2s}.saved.show{opacity:1}
+  .deny{max-width:460px;margin:80px auto;text-align:center;color:var(--muted)}
+  .hide{display:none!important}
+  .statgrid{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+  .stat{background:var(--surface2);border:1px solid var(--line);border-radius:11px;padding:10px 14px;min-width:90px}
+  .stat b{display:block;font-size:22px;font-weight:800}.stat span{font-size:11px;color:var(--muted)}
+  /* dashboard */
+  .statusrow{display:flex;gap:9px;flex-wrap:wrap;margin:2px 0 6px}
+  .chiplive{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;color:var(--text);background:var(--surface);border:1px solid var(--line);border-radius:20px;padding:6px 12px}
+  .dot2{width:8px;height:8px;border-radius:50%;flex:none}
+  .tilegroup{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--faint);font-weight:700;margin:20px 0 6px}
+  .tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(212px,1fr));gap:12px}
+  .tile{display:flex;flex-direction:column;gap:5px;text-align:left;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:15px 16px;cursor:pointer;color:var(--text);font:inherit;transition:border-color .15s,background .15s,transform .04s}
+  .tile:hover{border-color:var(--line2);background:var(--surface2)}
+  .tile:active{transform:translateY(1px)}
+  .tile .ic{font-size:22px;line-height:1}
+  .tile .t{font-weight:700;font-size:14px;margin-top:3px}
+  .tile .d{color:var(--muted);font-size:12px;line-height:1.4}
+      .mic { width: 36px; min-width: 36px; height: 36px; padding: 0; border-radius: 6px; border: 1px solid var(--border-strong, #2b3550); background: var(--surface, #131a2b); color: var(--text-muted, #93a0bd); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; transition: background 120ms ease, color 120ms ease; }
+      .mic:hover { background: var(--surface-2, #1a2236); color: var(--text, #e7ecf6); }
+      .mic svg { width: 16px; height: 16px; }
+      .mic.rec { border-color: #ef4444; color: #ef4444; }
+      .mic.busy { opacity: 0.6; cursor: wait; }
+  /* standalone login overlay (replaces the extension's borrowed token) */
+  .login{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:50;padding:20px}
+  .login.hide{display:none!important}
+  .loginbox{width:100%;max-width:360px;background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:28px 24px;text-align:center}
+  .login input{width:100%;background:var(--surface2);border:1px solid var(--line2);border-radius:9px;color:var(--text);padding:11px 13px;font:inherit;font-size:15px;text-align:center;margin:0}
+  .login .logo{margin:0 auto 14px}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="logo">C&amp;S</div>
+  <h1>Admin Console <span>· Carnes &amp; Sons</span></h1>
+  <div class="who" id="who"></div>
+  <button class="btn" id="signout" style="margin-left:10px;display:none;padding:6px 12px">Sign out</button>
+</header>
+<div id="login" class="login hide">
+  <div class="loginbox">
+    <div class="logo">C&amp;S</div>
+    <h2 style="margin:0 0 6px;font-size:19px">Office Console</h2>
+    <p id="loginMsg" class="muted" style="margin:0 0 16px">Sign in with your staff phone number.</p>
+    <div id="step1">
+      <input id="phone" type="tel" placeholder="+1 210 555 1234" autocomplete="tel"/>
+      <button class="btn primary" id="sendBtn" style="width:100%;margin-top:10px;justify-content:center">Text me a code</button>
+    </div>
+    <div id="step2" class="hide">
+      <input id="code" type="tel" inputmode="numeric" maxlength="6" placeholder="6-digit code"/>
+      <button class="btn primary" id="verifyBtn" style="width:100%;margin-top:10px;justify-content:center">Sign in</button>
+      <button class="btn" id="backBtn" style="width:100%;margin-top:8px;justify-content:center">Use a different number</button>
+    </div>
+    <div id="loginErr" style="color:var(--danger);font-size:13px;margin-top:10px"></div>
+  </div>
+</div>
+<div id="deny" class="deny hide"><h2>Admins only</h2><p>This console is for admins and owners. You're signed in, but this account isn't an admin. <a href="#" id="denyLogout">Sign out</a> and try a different number.</p></div>
+<div class="wrap" id="app" style="display:none">
+  <nav class="side">
+    <button data-pane="dashboard" class="active">🏠 Dashboard</button>
+
+    <div class="navgroup">Workspace</div>
+    <button data-pane="email">📧 Email</button>
+    <button data-pane="proposals">📝 Proposals</button>
+    <button data-pane="equipment">🔧 Equipment</button>
+
+    <div class="navgroup">Phone</div>
+    <button data-pane="ivr">📞 Phone &amp; IVR</button>
+    <button data-pane="autosms">💬 Automatic texts</button>
+    <button data-pane="sounds">🔔 Notification sounds</button>
+
+    <button data-pane="callsearch">&#128222; Call Search</button>
+
+    <div class="navgroup">Sales &amp; money</div>
+    <button data-pane="margins">🧮 Pricing</button>
+    <button data-pane="finance">💳 Financing</button>
+    <button data-pane="lineitems">🧾 Booking line items</button>
+    <button data-pane="membership">⭐ Comfort Club</button>
+
+    <button data-pane="installtodo">&#9989; Install To-Do</button>
+    <button data-pane="installs">&#127959; Installs</button>
+    <div class="navgroup">People</div>
+    <button data-pane="team">👷 Team</button>
+
+    <div class="navgroup">System</div>
+    <button data-pane="tools">🧰 Claude's tools</button>
+    <button data-pane="cleanup">🧹 Cleanup</button>
+    <button data-pane="health">&#10084; Health</button>
+    <button data-pane="photos">&#128247; Photos</button>
+        <button data-pane="aps">&#128248; APS photos</button>
+        <button data-pane="rebates">&#128203; Rebates</button>
+        <button data-pane="pricebook">&#128218; Pricebook</button>
+        <button data-pane="apilog">&#128225; Website API</button>
+          <button data-pane="leads">&#127919; Leads</button>
+  </nav>
+  <main id="main"></main>
+</div>
+<script src="admin.js"></script>
+</body>
+</html>
