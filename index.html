@@ -162,7 +162,7 @@
 // SKIP_WAITING so it activates, then controllerchange reloads to the fresh version. Also polls hourly +
 // on tab refocus, and the header "Check for update" button forces a check on demand.
 (function () {
-  var VERSION = "1.0.6";
+  var VERSION = "1.0.7";
   var vEl = document.getElementById("cs-ver"); if (vEl) vEl.textContent = "v" + VERSION;
   function showUpd() { var b = document.getElementById("update-banner"); if (b) b.style.display = "flex"; }
   if (!("serviceWorker" in navigator)) return;
