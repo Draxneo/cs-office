@@ -597,13 +597,45 @@ function custShowTab(key) {
   body.innerHTML = custTabHtml(key, d);
   body.querySelectorAll("[data-tx]").forEach((b) => b.addEventListener("click", () => { const t = document.getElementById(b.getAttribute("data-tx")); if (t) t.style.display = (t.style.display === "none" ? "block" : "none"); }));
   body.querySelectorAll("[data-goto]").forEach((b) => b.addEventListener("click", () => custShowTab(b.getAttribute("data-goto"))));
+  body.querySelectorAll("[data-scaneq]").forEach((b) => b.addEventListener("click", () => custScanPhotos(b)));
+}
+
+// Read model/serial off THIS customer's Housecall job photos (equipment-photo-scan), then reload
+// the customer so the new units show up on the Equipment tab. Vision can take ~a minute per batch.
+async function custScanPhotos(btn) {
+  if (!custData || !custData.customer) return;
+  const id = custData.customer.id;
+  btn.disabled = true; const old = btn.innerHTML; btn.innerHTML = "Scanning photos&#8230; (up to a minute)";
+  let r;
+  try { r = await api("equipment-photo-scan", { token: TOKEN, customer_id: id }); } catch (_e) { r = null; }
+  if (r && r.ok) {
+    const msg = `Scanned ${r.scanned || 0} photo${(r.scanned === 1) ? "" : "s"} · added ${r.inserted || 0} new unit${(r.inserted === 1) ? "" : "s"}` +
+      (r.skipped_dupes ? `, ${r.skipped_dupes} already on file` : "") +
+      ((r.inserted || 0) ? ". Check the 📷 rows and confirm the serials." : (r.photos_available ? ". Nothing new found." : ". No Housecall photos on this customer."));
+    await custOpen(id);          // reloads profile + equipment from the backend
+    custShowTab("equipment");    // stay on the Equipment tab
+    alert(msg);
+  } else {
+    btn.disabled = false; btn.innerHTML = old;
+    alert("Scan failed: " + ((r && r.error) || "couldn't reach the scanner"));
+  }
 }
 
 const custWhen = (s) => fmtDateTime(s);
 const custJobUrl = (jid) => `https://pro.housecallpro.com/app/jobs/${jid}`;
 
 function custTabHtml(key, d) {
-  if (key === "equipment") { const eq = d.equipment || []; return eq.length ? eq.map((e) => `<div class="card" style="padding:9px 12px;margin-bottom:7px"><div><b>${esc(e.model || "—")}</b> ${e.vendor ? custBadge(e.vendor, "rgba(52,211,238,.12)") : ""}${e.type ? ` <span class="muted" style="font-size:12px">&middot; ${esc(e.type)}</span>` : ""}</div><div class="muted" style="font-size:12px;margin-top:2px">Serial: <span style="color:#cbd5e1">${esc(e.serial || "—")}</span>${e.date ? " &middot; " + esc(fmtDate(e.date)) : ""}${e.tech ? " &middot; " + esc(e.tech) : ""}</div></div>`).join("") : `<div class="muted">No equipment captured from invoices yet. The email/invoice scanner adds model + serial numbers as vendor invoices come in.</div>`; }
+  if (key === "equipment") {
+    const eq = d.equipment || [];
+    // Header: explain the two sources + the "Scan photos" action. Photo reads are PROPOSALS that
+    // need Clint's eye before warranty use, so the button text and the per-row badge both flag that.
+    const head = `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:9px"><span class="muted" style="font-size:12px">Model + serial from vendor invoices <b>and</b> from job photos. Photo reads show a badge &mdash; eyeball the serial before any warranty registration.</span><button class="btn" data-scaneq="1" style="padding:5px 12px;font-size:12.5px">&#128247; Scan photos for equipment</button></div>`;
+    const list = eq.length ? eq.map((e) => {
+      const photo = /^photo/.test(String(e.status || ""));            // photo_unseen / photo-* => from a photo, not an invoice
+      return `<div class="card" style="padding:9px 12px;margin-bottom:7px"><div><b>${esc(e.model || "—")}</b> ${e.vendor ? custBadge(e.vendor, "rgba(52,211,238,.12)") : ""}${e.type ? ` <span class="muted" style="font-size:12px">&middot; ${esc(e.type)}</span>` : ""}${photo ? " " + custBadge("📷 from photo — confirm", "rgba(251,191,36,.16)") : ""}</div><div class="muted" style="font-size:12px;margin-top:2px">Serial: <span style="color:#cbd5e1">${esc(e.serial || "—")}</span>${e.date ? " &middot; " + esc(fmtDate(e.date)) : ""}${e.tech ? " &middot; " + esc(e.tech) : ""}</div></div>`;
+    }).join("") : `<div class="muted">No equipment captured yet. Vendor invoices add it automatically; press &#8220;Scan photos&#8221; to read model + serial off this customer&#8217;s job photos.</div>`;
+    return head + list;
+  }
   if (key === "estimates") { const es = d.estimates || []; return es.length ? es.map((e) => `<div class="card" style="padding:9px 12px;margin-bottom:7px"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><div><b>${esc(e.number || "Estimate")}</b> ${custBadge(e.status || "", e.status === "approved" ? "rgba(52,211,238,.15)" : (e.status === "declined" ? "rgba(244,63,94,.15)" : ""))} <span class="muted" style="font-size:12px">&middot; ${esc(fmtDate(e.created))}${e.top_total != null ? " &middot; up to $" + e.top_total.toLocaleString() : ""}${e.options > 1 ? " &middot; " + e.options + " options" : ""}</span></div><a href="${esc(e.hcp_url)}" target="_blank" rel="noopener" class="btn" style="padding:3px 10px;font-size:12px">Open in Housecall &#8599;</a></div></div>`).join("") : `<div class="muted">No estimates.</div>`; }
   if (key === "jobs") return d.jobs.length ? d.jobs.map((j) => `<div class="card" style="padding:9px 12px;margin-bottom:7px"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><div><b>${esc(j.job || "—")}</b> ${j.install ? custBadge("Install", "rgba(52,211,238,.15)") : ""} <span class="muted" style="font-size:12px">&middot; ${esc(fmtDate(j.date))} &middot; ${esc(j.status || "")}${j.total != null ? " &middot; $" + j.total.toLocaleString() : ""}</span></div><a href="${esc(custJobUrl(j.hcp_job_id))}" target="_blank" rel="noopener" class="btn" style="padding:3px 10px;font-size:12px">Open in Housecall &#8599;</a></div><div class="muted" style="font-size:12px;margin-top:2px">${esc(j.description || "")}</div></div>`).join("") : `<div class="muted">No jobs.</div>`;
   if (key === "calls") return d.calls.length ? d.calls.map((cl, ix) => { const tid = "cust-tx-" + ix; return `<div class="card" style="padding:9px 12px;margin-bottom:7px;font-size:13px"><div><b>${esc(cl.kind || "call")}</b> ${cl.urgency ? custBadge(cl.urgency) : ""} <span class="muted">${custWhen(cl.date)}</span></div>${cl.summary ? `<div style="margin:4px 0">${esc(cl.summary)}</div>` : ""}${cl.has_recording ? `<audio controls preload="none" src="${esc(cl.recording_stream)}" style="width:100%;max-width:340px;height:36px;margin:4px 0"></audio>` : ""}${cl.transcript ? `<button class="btn" data-tx="${tid}" style="padding:2px 9px;font-size:12px">Transcript</button><div id="${tid}" style="display:none;white-space:pre-wrap;margin-top:6px;font-size:12px;color:#cbd5e1;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:9px">${esc(cl.transcript)}</div>` : ""}</div>`; }).join("") : `<div class="muted">No calls.</div>`;
