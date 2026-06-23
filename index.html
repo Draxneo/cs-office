@@ -3,7 +3,11 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Carnes &amp; Sons — Admin Console</title>
+<title>Carnes &amp; Sons — Office Console</title>
+<link rel="manifest" href="manifest.webmanifest"/>
+<meta name="theme-color" content="#0b1120"/>
+<link rel="icon" type="image/png" href="icon-192.png"/>
+<link rel="apple-touch-icon" href="icon-180.png"/>
 <style>
   :root{--bg:#0b1120;--surface:#121a2b;--surface2:#1a2436;--line:#26324a;--line2:#374a66;--text:#e8eef7;--muted:#9fb0c7;--faint:#5f7187;--accent:#34d3ee;--grad:linear-gradient(135deg,#22d3ee,#3b82f6);--danger:#f43f5e;--warn:#fbbf24;--success:#34d399}
   *{box-sizing:border-box}
@@ -144,6 +148,7 @@
   </nav>
   <main id="main"></main>
 </div>
+<script>if("serviceWorker" in navigator){window.addEventListener("load",function(){navigator.serviceWorker.register("sw.js").catch(function(){});});}</script>
 <script src="admin.js"></script>
 </body>
 </html>
