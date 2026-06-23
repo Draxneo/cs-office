@@ -436,30 +436,56 @@ const custBadge = (txt, bg) => `<span class="pill" style="${bg ? "background:" +
 
 async function renderCustomers() {
   const m = $("main");
+  let az = "";
+  for (let i = 65; i <= 90; i++) { const L = String.fromCharCode(i); az += `<button data-letter="${L}" style="padding:5px 9px;min-width:30px;border:1px solid var(--line2);background:var(--surface2);color:var(--text);border-radius:7px;cursor:pointer;font:inherit;font-size:12px;font-weight:600">${L}</button>`; }
   m.innerHTML = `<h2 class="sec">Customers &#128100;</h2>
-    <p class="sub">Search a customer to see everything in one place &mdash; profile, jobs &amp; installs, calls (with recordings + transcripts), and texts (with photos). A read-only view of data we already store.</p>
+    <p class="sub">Your recently-touched customers are below &mdash; just tap one. Or jump by letter, or search by name/phone. Each opens their full record (profile, jobs, calls + recordings, texts + photos).</p>
     <div class="saverow" style="gap:8px;flex-wrap:nowrap"><input id="cust-q" type="text" placeholder="Search by name or phone&#8230;" style="flex:1" autocomplete="off"/><button class="btn primary" id="cust-search">Search</button></div>
+    <div id="cust-az" style="display:flex;flex-wrap:wrap;gap:4px;margin-top:10px">${az}</div>
     <div id="cust-results" style="margin-top:12px"></div>
     <div id="cust-detail" style="margin-top:12px"></div>`;
   const go = () => custSearch($("cust-q").value);
   $("cust-search").addEventListener("click", go);
   $("cust-q").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); go(); } });
-  $("cust-q").focus();
+  $("cust-az").querySelectorAll("[data-letter]").forEach((b) => b.addEventListener("click", () => custByLetter(b.getAttribute("data-letter"))));
+  custLoadRecent();
+}
+
+// shared list renderer (recent / by-letter / search). showTouch adds the "via · date" chip.
+function custRenderList(list, header, showTouch) {
+  const r = $("cust-results"); if (!r) return;
+  const head = `<div class="muted" style="margin:2px 0 8px">${esc(header)}${list.length ? " &middot; " + list.length : ""}</div>`;
+  if (!list.length) { r.innerHTML = head + `<div class="card"><div class="muted">No customers.</div></div>`; return; }
+  r.innerHTML = head + list.map((c) => `<div class="card" data-cust="${esc(c.id)}" style="cursor:pointer;padding:9px 12px;margin-bottom:7px;display:flex;justify-content:space-between;align-items:center;gap:8px">
+      <div><strong>${esc(c.name || "(no name)")}</strong> <span class="muted" style="font-size:12px">&middot; ${esc(c.phone || "")}${c.jurisdiction ? " &middot; " + esc(c.jurisdiction) : ""}</span></div>
+      ${showTouch && c.last_touch ? `<span class="muted" style="font-size:11px;white-space:nowrap">${esc(c.via || "")} &middot; ${esc(c.last_touch)}</span>` : ""}
+    </div>`).join("");
+  r.querySelectorAll("[data-cust]").forEach((el) => el.addEventListener("click", () => custOpen(el.getAttribute("data-cust"))));
+}
+
+async function custLoadRecent() {
+  const r = $("cust-results"); if (!r) return;
+  r.innerHTML = `<div class="muted">Loading recent customers&#8230;</div>`;
+  const d = await custApi("recent", {});
+  custRenderList((d && d.recent) || [], "Recent customers", true);
+}
+
+async function custByLetter(L) {
+  $("cust-detail").innerHTML = ""; const q = $("cust-q"); if (q) q.value = "";
+  const r = $("cust-results"); if (!r) return;
+  r.innerHTML = `<div class="muted">Loading&#8230;</div>`;
+  const d = await custApi("by_letter", { letter: L });
+  custRenderList((d && d.customers) || [], "Customers — " + L, false);
 }
 
 async function custSearch(q) {
   q = (q || "").trim();
   const r = $("cust-results"); if (!r) return;
   $("cust-detail").innerHTML = "";
-  if (q.length < 2) { r.innerHTML = `<div class="muted">Type at least 2 characters.</div>`; return; }
+  if (q.length < 2) { custLoadRecent(); return; }   // empty search -> back to the recent list
   r.innerHTML = `<div class="muted">Searching&#8230;</div>`;
   const d = await custApi("search", { q });
-  const list = (d && d.customers) || [];
-  if (!list.length) { r.innerHTML = `<div class="card"><div class="muted">No matches.</div></div>`; return; }
-  r.innerHTML = list.map((c) => `<div class="card" data-cust="${esc(c.id)}" style="cursor:pointer;padding:10px;margin-bottom:8px">
-      <strong>${esc(c.name || "(no name)")}</strong> <span class="muted" style="font-size:12px">&middot; ${esc(c.phone || "")}${c.jurisdiction ? " &middot; " + esc(c.jurisdiction) : ""}</span>
-      <div class="muted" style="font-size:12px">${esc(c.address || "")}</div></div>`).join("");
-  r.querySelectorAll("[data-cust]").forEach((el) => el.addEventListener("click", () => custOpen(el.getAttribute("data-cust"))));
+  custRenderList((d && d.customers) || [], `Results for "${q}"`, false);
 }
 
 async function custOpen(id) {

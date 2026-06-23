@@ -1,7 +1,7 @@
 // Carnes & Sons Office Console — service worker. Makes the console installable as a desktop app
 // and gives a fast/offline shell. Network-first for same-origin GETs only; API calls to Supabase
 // (cross-origin) are NOT touched, so the console always talks live to the backend.
-var V = '1.0.1';
+var V = '1.0.2';
 var CACHE = 'csoffice-' + V;
 var CORE = ['index.html', 'admin.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png'];
 self.addEventListener('install', function (e) {
