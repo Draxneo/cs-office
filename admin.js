@@ -552,50 +552,68 @@ function custRenderJobs(jobs, label) {
   r.querySelectorAll("[data-cust]").forEach((el) => el.addEventListener("click", () => { const id = el.getAttribute("data-cust"); if (id) custOpen(id); }));
 }
 
+// A customer is the HOME: open one and everything lives in TABS (Overview, Jobs, Calls, Texts, Photos, To-Dos).
+let custData = null, custTab = "overview";
 async function custOpen(id) {
   $("cust-results").innerHTML = "";
   const dt = $("cust-detail"); dt.innerHTML = `<div class="muted">Loading&#8230;</div>`;
   const d = await custApi("get", { customer_id: id });
   if (!d || !d.ok) { dt.innerHTML = `<div class="card"><div class="muted">${esc((d && d.error) || "Couldn't load this customer")}</div></div>`; return; }
-  dt.innerHTML = renderCustDetail(d);
+  // flatten all photos across texts once, for the Photos tab
+  d._photos = []; (d.texts || []).forEach((t) => (t.media || []).forEach((u) => d._photos.push({ u: u, date: t.date, dir: t.direction })));
+  custData = d; custTab = "overview";
+  dt.innerHTML = renderCustShell(d);
   const back = $("cust-back"); if (back) back.addEventListener("click", renderCustomers);
-  dt.querySelectorAll("[data-tx]").forEach((b) => b.addEventListener("click", () => { const t = document.getElementById(b.getAttribute("data-tx")); if (t) t.style.display = (t.style.display === "none" ? "block" : "none"); }));
+  dt.querySelectorAll("[data-ctab]").forEach((b) => b.addEventListener("click", () => custShowTab(b.getAttribute("data-ctab"))));
+  custShowTab("overview");
 }
 
-function renderCustDetail(d) {
+function renderCustShell(d) {
   const c = d.customer;
-  const when = (s) => String(s || "").slice(0, 16).replace("T", " ");
-  let h = `<button class="btn" id="cust-back" style="margin-bottom:10px">&#8592; Back to search</button>`;
-  // profile
-  h += `<div class="card"><h3 style="margin:0 0 6px">${esc(c.name || "(no name)")}</h3>
-    <div class="muted" style="font-size:13px;line-height:1.8">
-      &#128222; ${esc(c.phone || "—")}${c.phone_type ? " (" + esc(c.phone_type) + ")" : ""} &nbsp;&nbsp; &#9993;&#65039; ${esc(c.email || "—")}<br>
-      &#127968; ${esc(c.address || "—")}<br>
-      &#128205; ${esc(c.jurisdiction || "—")}${c.county ? " &middot; " + esc(c.county) : ""} &nbsp; ${c.cps_customer === true ? custBadge("CPS Energy", "rgba(52,211,238,.15)") : (c.cps_customer === false ? custBadge("Not CPS") : "")} ${d.membership ? custBadge("Comfort Club" + (d.membership.status ? ": " + d.membership.status : ""), "rgba(251,191,36,.15)") : ""}
-    </div></div>`;
-  // installs
-  if (d.installs && d.installs.length) {
-    h += `<div class="card"><h3 style="margin:0 0 8px">&#127959; Installs</h3>` + d.installs.map((i) => `<div style="padding:6px 0;border-top:1px solid var(--line);font-size:13px"><b>Job ${esc(i.job || "?")}</b> &mdash; ${i.done}/${i.total} steps done${i.open_steps && i.open_steps.length ? ` <span class="muted">&middot; left: ${esc(i.open_steps.join(", "))}</span>` : " &#9989;"}</div>`).join("") + `</div>`;
-  }
-  // jobs
-  h += `<div class="card"><h3 style="margin:0 0 8px">&#128296; Jobs (${d.counts.jobs})</h3>${d.jobs.length ? d.jobs.map((j) => `<div style="padding:6px 0;border-top:1px solid var(--line);font-size:13px"><b>${esc(j.job || "—")}</b> ${j.install ? custBadge("Install", "rgba(52,211,238,.15)") : ""} <span class="muted">${j.date || ""}</span> &middot; ${esc(j.status || "")} ${j.total != null ? "&middot; $" + j.total.toLocaleString() : ""}<div class="muted" style="font-size:12px">${esc(j.description || "")}</div></div>`).join("") : `<div class="muted">None.</div>`}</div>`;
-  // calls
-  h += `<div class="card"><h3 style="margin:0 0 8px">&#128222; Calls (${d.counts.calls})</h3>${d.calls.length ? d.calls.map((cl, ix) => {
-    const tid = "cust-tx-" + ix;
-    return `<div style="padding:8px 0;border-top:1px solid var(--line);font-size:13px">
-      <div><b>${esc(cl.kind || "call")}</b> ${cl.urgency ? custBadge(cl.urgency) : ""} <span class="muted">${when(cl.date)}</span></div>
-      ${cl.summary ? `<div style="margin:4px 0">${esc(cl.summary)}</div>` : ""}
-      ${cl.has_recording ? `<audio controls preload="none" src="${esc(cl.recording_stream)}" style="width:100%;max-width:340px;height:36px;margin:4px 0"></audio>` : ""}
-      ${cl.transcript ? `<button class="btn" data-tx="${tid}" style="padding:2px 9px;font-size:12px">Transcript</button><div id="${tid}" style="display:none;white-space:pre-wrap;margin-top:6px;font-size:12px;color:#cbd5e1;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:9px">${esc(cl.transcript)}</div>` : ""}
-    </div>`;
-  }).join("") : `<div class="muted">None.</div>`}</div>`;
-  // texts (oldest->newest, chat style)
-  h += `<div class="card"><h3 style="margin:0 0 8px">&#128172; Texts (${d.counts.texts})</h3><div style="max-height:400px;overflow:auto">${d.texts.length ? d.texts.slice().reverse().map((t) => {
-    const me = t.direction === "outbound";
-    const imgs = (t.media || []).map((u) => `<img src="${esc(u)}" loading="lazy" style="max-width:130px;max-height:130px;border-radius:8px;margin:5px 5px 0 0;display:inline-block"/>`).join("");
-    return `<div style="margin:6px 0;display:flex;${me ? "justify-content:flex-end" : ""}"><div style="max-width:80%;padding:7px 11px;border-radius:12px;font-size:13px;white-space:pre-wrap;${me ? "background:var(--grad);color:#06121f" : "background:var(--surface2);color:var(--text)"}">${esc(t.body || "")}${imgs ? "<br>" + imgs : ""}<div style="opacity:.6;font-size:10px;margin-top:3px">${when(t.date)}</div></div></div>`;
-  }).join("") : `<div class="muted">None.</div>`}</div></div>`;
-  return h;
+  const tab = (key, label, n) => `<button data-ctab="${key}" style="padding:8px 13px;border:none;border-bottom:2px solid transparent;background:none;color:var(--muted);font:inherit;font-size:13.5px;font-weight:600;cursor:pointer;white-space:nowrap">${label}${n != null ? ` <span style="opacity:.55">${n}</span>` : ""}</button>`;
+  return `<button class="btn" id="cust-back" style="margin-bottom:10px">&#8592; Back</button>
+    <div class="card" style="padding:14px">
+      <h3 style="margin:0 0 4px;font-size:18px">${esc(c.name || "(no name)")}</h3>
+      <div class="muted" style="font-size:13px;line-height:1.8">
+        &#128222; ${esc(c.phone || "—")}${c.phone_type ? " (" + esc(c.phone_type) + ")" : ""} &nbsp;&nbsp; &#9993;&#65039; ${esc(c.email || "—")}<br>
+        &#127968; ${esc(c.address || "—")}<br>
+        &#128205; ${esc(c.jurisdiction || "—")}${c.county ? " &middot; " + esc(c.county) : ""} &nbsp; ${c.cps_customer === true ? custBadge("CPS Energy", "rgba(52,211,238,.15)") : (c.cps_customer === false ? custBadge("Not CPS") : "")} ${d.membership ? custBadge("Comfort Club" + (d.membership.status ? ": " + d.membership.status : ""), "rgba(251,191,36,.15)") : ""}
+      </div>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:2px;border-bottom:1px solid var(--line);margin:6px 0 12px;overflow-x:auto">
+      ${tab("overview", "Overview")}${tab("jobs", "Jobs", d.counts.jobs)}${tab("calls", "Calls", d.counts.calls)}${tab("texts", "Texts", d.counts.texts)}${tab("photos", "Photos", d._photos.length)}${tab("todos", "To-Dos", (d.installs || []).length)}
+    </div>
+    <div id="cust-tabbody"></div>`;
+}
+
+function custShowTab(key) {
+  custTab = key; const d = custData; if (!d) return;
+  document.querySelectorAll("[data-ctab]").forEach((b) => { const on = b.getAttribute("data-ctab") === key; b.style.color = on ? "var(--accent)" : "var(--muted)"; b.style.borderBottomColor = on ? "var(--accent)" : "transparent"; });
+  const body = $("cust-tabbody"); if (!body) return;
+  body.innerHTML = custTabHtml(key, d);
+  body.querySelectorAll("[data-tx]").forEach((b) => b.addEventListener("click", () => { const t = document.getElementById(b.getAttribute("data-tx")); if (t) t.style.display = (t.style.display === "none" ? "block" : "none"); }));
+  body.querySelectorAll("[data-goto]").forEach((b) => b.addEventListener("click", () => custShowTab(b.getAttribute("data-goto"))));
+}
+
+const custWhen = (s) => String(s || "").slice(0, 16).replace("T", " ");
+const custJobUrl = (jid) => `https://pro.housecallpro.com/app/jobs/${jid}`;
+
+function custTabHtml(key, d) {
+  if (key === "jobs") return d.jobs.length ? d.jobs.map((j) => `<div class="card" style="padding:9px 12px;margin-bottom:7px"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><div><b>${esc(j.job || "—")}</b> ${j.install ? custBadge("Install", "rgba(52,211,238,.15)") : ""} <span class="muted" style="font-size:12px">&middot; ${j.date || ""} &middot; ${esc(j.status || "")}${j.total != null ? " &middot; $" + j.total.toLocaleString() : ""}</span></div><a href="${esc(custJobUrl(j.hcp_job_id))}" target="_blank" rel="noopener" class="btn" style="padding:3px 10px;font-size:12px">Open in Housecall &#8599;</a></div><div class="muted" style="font-size:12px;margin-top:2px">${esc(j.description || "")}</div></div>`).join("") : `<div class="muted">No jobs.</div>`;
+  if (key === "calls") return d.calls.length ? d.calls.map((cl, ix) => { const tid = "cust-tx-" + ix; return `<div class="card" style="padding:9px 12px;margin-bottom:7px;font-size:13px"><div><b>${esc(cl.kind || "call")}</b> ${cl.urgency ? custBadge(cl.urgency) : ""} <span class="muted">${custWhen(cl.date)}</span></div>${cl.summary ? `<div style="margin:4px 0">${esc(cl.summary)}</div>` : ""}${cl.has_recording ? `<audio controls preload="none" src="${esc(cl.recording_stream)}" style="width:100%;max-width:340px;height:36px;margin:4px 0"></audio>` : ""}${cl.transcript ? `<button class="btn" data-tx="${tid}" style="padding:2px 9px;font-size:12px">Transcript</button><div id="${tid}" style="display:none;white-space:pre-wrap;margin-top:6px;font-size:12px;color:#cbd5e1;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:9px">${esc(cl.transcript)}</div>` : ""}</div>`; }).join("") : `<div class="muted">No calls.</div>`;
+  if (key === "texts") return `<div class="card" style="max-height:460px;overflow:auto">${d.texts.length ? d.texts.slice().reverse().map((t) => { const me = t.direction === "outbound"; const imgs = (t.media || []).map((u) => `<img src="${esc(u)}" loading="lazy" style="max-width:130px;max-height:130px;border-radius:8px;margin:5px 5px 0 0;display:inline-block"/>`).join(""); return `<div style="margin:6px 0;display:flex;${me ? "justify-content:flex-end" : ""}"><div style="max-width:80%;padding:7px 11px;border-radius:12px;font-size:13px;white-space:pre-wrap;${me ? "background:var(--grad);color:#06121f" : "background:var(--surface2);color:var(--text)"}">${esc(t.body || "")}${imgs ? "<br>" + imgs : ""}<div style="opacity:.6;font-size:10px;margin-top:3px">${custWhen(t.date)}</div></div></div>`; }).join("") : `<div class="muted">No texts.</div>`}</div>`;
+  if (key === "photos") return d._photos.length ? `<div class="card" style="display:flex;flex-wrap:wrap;gap:8px">${d._photos.map((p) => `<a href="${esc(p.u)}" target="_blank" rel="noopener" title="${esc(custWhen(p.date))}"><img src="${esc(p.u)}" loading="lazy" style="width:130px;height:130px;object-fit:cover;border-radius:8px"/></a>`).join("")}</div>` : `<div class="muted">No photos texted in.</div>`;
+  if (key === "todos") return (d.installs || []).length ? d.installs.map((i) => `<div class="card" style="padding:10px 12px;margin-bottom:7px"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><b>Install &middot; Job ${esc(i.job || "?")}</b> <a href="${esc(custJobUrl(i.hcp_job_id))}" target="_blank" rel="noopener" class="btn" style="padding:3px 10px;font-size:12px">Open &#8599;</a></div><div class="muted" style="font-size:13px;margin-top:4px">${i.done}/${i.total} steps done${i.open_steps && i.open_steps.length ? ` &middot; left: ${esc(i.open_steps.join(", "))}` : " &#9989; all done"}</div></div>`).join("") : `<div class="muted">No installs / to-dos for this customer.</div>`;
+  // overview
+  const lastJob = d.jobs[0], lastCall = d.calls[0], lastText = d.texts[0];
+  const link = (key2, label) => `<button class="btn" data-goto="${key2}" style="padding:3px 10px;font-size:12px">${label}</button>`;
+  return `<div class="card" style="font-size:13px;line-height:1.7">
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">${link("jobs", "Jobs " + d.counts.jobs)} ${link("calls", "Calls " + d.counts.calls)} ${link("texts", "Texts " + d.counts.texts)} ${link("photos", "Photos " + d._photos.length)} ${link("todos", "To-Dos " + (d.installs || []).length)}</div>
+    ${lastJob ? `<div><b>Last job:</b> ${esc(lastJob.job || "—")}${lastJob.install ? " (install)" : ""} &middot; ${lastJob.date || ""} &middot; ${esc(lastJob.status || "")} &mdash; <span class="muted">${esc(lastJob.description || "")}</span></div>` : `<div class="muted">No jobs yet.</div>`}
+    ${lastCall ? `<div style="margin-top:6px"><b>Last call:</b> ${custWhen(lastCall.date)} &mdash; <span class="muted">${esc(lastCall.summary || lastCall.kind || "")}</span></div>` : ""}
+    ${lastText ? `<div style="margin-top:6px"><b>Last text:</b> ${custWhen(lastText.date)} (${esc(lastText.direction || "")}) &mdash; <span class="muted">${esc(String(lastText.body || "").slice(0, 100))}</span></div>` : ""}
+    ${(d.installs || []).length ? `<div style="margin-top:6px"><b>Open install work:</b> ${d.installs.map((i) => "Job " + esc(i.job || "?") + " (" + i.done + "/" + i.total + ")").join(", ")}</div>` : ""}
+  </div>`;
 }
 
 function renderDashboard() {
