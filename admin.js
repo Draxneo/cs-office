@@ -119,6 +119,7 @@ function navTo(pane) { document.querySelectorAll("nav.side button").forEach((b) 
 function render(pane) {
   if (pane === "dashboard") return renderDashboard();
   if (pane === "claude") return renderOfficeChat();
+  if (pane === "customers") return renderCustomers();
   if (pane === "ivr") return renderIvr();
   if (pane === "autosms") return renderAutoSms();
   if (pane === "lineitems") return renderLineItems();
@@ -428,6 +429,85 @@ async function sendOfficeChat(text) {
   }
 }
 
+// ---- Customers 360 — one customer, everything (customer-360 fn). Read-only view of existing data:
+// profile + jurisdiction/CPS/membership, jobs/installs, calls (recording player + transcript), texts (+ photos). ----
+function custApi(action, extra) { return api("customer-360", Object.assign({ token: TOKEN, action }, extra || {})); }
+const custBadge = (txt, bg) => `<span class="pill" style="${bg ? "background:" + bg : ""}">${esc(txt)}</span>`;
+
+async function renderCustomers() {
+  const m = $("main");
+  m.innerHTML = `<h2 class="sec">Customers &#128100;</h2>
+    <p class="sub">Search a customer to see everything in one place &mdash; profile, jobs &amp; installs, calls (with recordings + transcripts), and texts (with photos). A read-only view of data we already store.</p>
+    <div class="saverow" style="gap:8px;flex-wrap:nowrap"><input id="cust-q" type="text" placeholder="Search by name or phone&#8230;" style="flex:1" autocomplete="off"/><button class="btn primary" id="cust-search">Search</button></div>
+    <div id="cust-results" style="margin-top:12px"></div>
+    <div id="cust-detail" style="margin-top:12px"></div>`;
+  const go = () => custSearch($("cust-q").value);
+  $("cust-search").addEventListener("click", go);
+  $("cust-q").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); go(); } });
+  $("cust-q").focus();
+}
+
+async function custSearch(q) {
+  q = (q || "").trim();
+  const r = $("cust-results"); if (!r) return;
+  $("cust-detail").innerHTML = "";
+  if (q.length < 2) { r.innerHTML = `<div class="muted">Type at least 2 characters.</div>`; return; }
+  r.innerHTML = `<div class="muted">Searching&#8230;</div>`;
+  const d = await custApi("search", { q });
+  const list = (d && d.customers) || [];
+  if (!list.length) { r.innerHTML = `<div class="card"><div class="muted">No matches.</div></div>`; return; }
+  r.innerHTML = list.map((c) => `<div class="card" data-cust="${esc(c.id)}" style="cursor:pointer;padding:10px;margin-bottom:8px">
+      <strong>${esc(c.name || "(no name)")}</strong> <span class="muted" style="font-size:12px">&middot; ${esc(c.phone || "")}${c.jurisdiction ? " &middot; " + esc(c.jurisdiction) : ""}</span>
+      <div class="muted" style="font-size:12px">${esc(c.address || "")}</div></div>`).join("");
+  r.querySelectorAll("[data-cust]").forEach((el) => el.addEventListener("click", () => custOpen(el.getAttribute("data-cust"))));
+}
+
+async function custOpen(id) {
+  $("cust-results").innerHTML = "";
+  const dt = $("cust-detail"); dt.innerHTML = `<div class="muted">Loading&#8230;</div>`;
+  const d = await custApi("get", { customer_id: id });
+  if (!d || !d.ok) { dt.innerHTML = `<div class="card"><div class="muted">${esc((d && d.error) || "Couldn't load this customer")}</div></div>`; return; }
+  dt.innerHTML = renderCustDetail(d);
+  const back = $("cust-back"); if (back) back.addEventListener("click", renderCustomers);
+  dt.querySelectorAll("[data-tx]").forEach((b) => b.addEventListener("click", () => { const t = document.getElementById(b.getAttribute("data-tx")); if (t) t.style.display = (t.style.display === "none" ? "block" : "none"); }));
+}
+
+function renderCustDetail(d) {
+  const c = d.customer;
+  const when = (s) => String(s || "").slice(0, 16).replace("T", " ");
+  let h = `<button class="btn" id="cust-back" style="margin-bottom:10px">&#8592; Back to search</button>`;
+  // profile
+  h += `<div class="card"><h3 style="margin:0 0 6px">${esc(c.name || "(no name)")}</h3>
+    <div class="muted" style="font-size:13px;line-height:1.8">
+      &#128222; ${esc(c.phone || "—")}${c.phone_type ? " (" + esc(c.phone_type) + ")" : ""} &nbsp;&nbsp; &#9993;&#65039; ${esc(c.email || "—")}<br>
+      &#127968; ${esc(c.address || "—")}<br>
+      &#128205; ${esc(c.jurisdiction || "—")}${c.county ? " &middot; " + esc(c.county) : ""} &nbsp; ${c.cps_customer === true ? custBadge("CPS Energy", "rgba(52,211,238,.15)") : (c.cps_customer === false ? custBadge("Not CPS") : "")} ${d.membership ? custBadge("Comfort Club" + (d.membership.status ? ": " + d.membership.status : ""), "rgba(251,191,36,.15)") : ""}
+    </div></div>`;
+  // installs
+  if (d.installs && d.installs.length) {
+    h += `<div class="card"><h3 style="margin:0 0 8px">&#127959; Installs</h3>` + d.installs.map((i) => `<div style="padding:6px 0;border-top:1px solid var(--line);font-size:13px"><b>Job ${esc(i.job || "?")}</b> &mdash; ${i.done}/${i.total} steps done${i.open_steps && i.open_steps.length ? ` <span class="muted">&middot; left: ${esc(i.open_steps.join(", "))}</span>` : " &#9989;"}</div>`).join("") + `</div>`;
+  }
+  // jobs
+  h += `<div class="card"><h3 style="margin:0 0 8px">&#128296; Jobs (${d.counts.jobs})</h3>${d.jobs.length ? d.jobs.map((j) => `<div style="padding:6px 0;border-top:1px solid var(--line);font-size:13px"><b>${esc(j.job || "—")}</b> ${j.install ? custBadge("Install", "rgba(52,211,238,.15)") : ""} <span class="muted">${j.date || ""}</span> &middot; ${esc(j.status || "")} ${j.total != null ? "&middot; $" + j.total.toLocaleString() : ""}<div class="muted" style="font-size:12px">${esc(j.description || "")}</div></div>`).join("") : `<div class="muted">None.</div>`}</div>`;
+  // calls
+  h += `<div class="card"><h3 style="margin:0 0 8px">&#128222; Calls (${d.counts.calls})</h3>${d.calls.length ? d.calls.map((cl, ix) => {
+    const tid = "cust-tx-" + ix;
+    return `<div style="padding:8px 0;border-top:1px solid var(--line);font-size:13px">
+      <div><b>${esc(cl.kind || "call")}</b> ${cl.urgency ? custBadge(cl.urgency) : ""} <span class="muted">${when(cl.date)}</span></div>
+      ${cl.summary ? `<div style="margin:4px 0">${esc(cl.summary)}</div>` : ""}
+      ${cl.has_recording ? `<audio controls preload="none" src="${esc(cl.recording_stream)}" style="width:100%;max-width:340px;height:36px;margin:4px 0"></audio>` : ""}
+      ${cl.transcript ? `<button class="btn" data-tx="${tid}" style="padding:2px 9px;font-size:12px">Transcript</button><div id="${tid}" style="display:none;white-space:pre-wrap;margin-top:6px;font-size:12px;color:#cbd5e1;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:9px">${esc(cl.transcript)}</div>` : ""}
+    </div>`;
+  }).join("") : `<div class="muted">None.</div>`}</div>`;
+  // texts (oldest->newest, chat style)
+  h += `<div class="card"><h3 style="margin:0 0 8px">&#128172; Texts (${d.counts.texts})</h3><div style="max-height:400px;overflow:auto">${d.texts.length ? d.texts.slice().reverse().map((t) => {
+    const me = t.direction === "outbound";
+    const imgs = (t.media || []).map((u) => `<img src="${esc(u)}" loading="lazy" style="max-width:130px;max-height:130px;border-radius:8px;margin:5px 5px 0 0;display:inline-block"/>`).join("");
+    return `<div style="margin:6px 0;display:flex;${me ? "justify-content:flex-end" : ""}"><div style="max-width:80%;padding:7px 11px;border-radius:12px;font-size:13px;white-space:pre-wrap;${me ? "background:var(--grad);color:#06121f" : "background:var(--surface2);color:var(--text)"}">${esc(t.body || "")}${imgs ? "<br>" + imgs : ""}<div style="opacity:.6;font-size:10px;margin-top:3px">${when(t.date)}</div></div></div>`;
+  }).join("") : `<div class="muted">None.</div>`}</div></div>`;
+  return h;
+}
+
 function renderDashboard() {
   const main = $("main");
   const name = String(($("who").textContent || "").split("·")[0] || "").trim() || "there";
@@ -441,7 +521,7 @@ function renderDashboard() {
     <div class="tilegroup">Sales &amp; money</div>
     <div class="tiles">${dashTile("margins", "📊", "Pricing", "Profit per matchup — cost+tax vs your live sell price; edit prices")}${dashTile("repairtiers", "🔧", "Repair tiers", "Repair level pricing the presentation app + brain use")}${dashTile("finance", "💳", "Financing", "Monthly-payment calculator + plans")}${dashTile("lineitems", "🧾", "Booking line items", "Default charges per booking type")}${dashTile("membership", "⭐", "Comfort Club", "Membership stats + tag sync")}</div>
     <div class="tilegroup">People</div>
-    <div class="tiles">${dashTile("claude", "&#129302;", "Claude (Office)", "Ask the office assistant — installs, jobs, customers, rebates, compliance")}</div>
+    <div class="tiles">${dashTile("claude", "&#129302;", "Claude (Office)", "Ask the office assistant — installs, jobs, customers, rebates, compliance")}${dashTile("customers", "&#128100;", "Customers", "One customer, everything — profile, jobs, calls (recordings+transcripts), texts &amp; photos")}</div>
     <div class="tiles">${dashTile("installtodo", "&#9989;", "Install To-Do", "Quick list of everything still outstanding across your installs")}${dashTile("installs", "&#127959;", "Installs", "Track every install — equipment, permit, QC, walkthrough, inspection, CPS rebate, warranty")}</div>
     <div class="tiles">${dashTile("team", "👷", "Technicians", "Your tech roster + re-sync their phone numbers from Housecall")}</div>
     <div class="tilegroup">System</div>
