@@ -143,6 +143,7 @@ function render(pane) {
   if (pane === "leads") return renderLeads();
   if (pane === "aps") return renderAps();
   if (pane === "rebates") return renderRebates();
+  if (pane === "installcal") return renderInstallCalendar();
   if (pane === "fieldcaptures") return renderFieldCaptures();
   if (pane === "pricebook") return renderPricebook();
   if (pane === "apilog") return renderApiLog();
@@ -793,6 +794,71 @@ async function renderFieldCaptures() {
   list$.querySelectorAll("[data-fc]").forEach((row) => row.addEventListener("click", () => { const d = $("fc-d-" + row.getAttribute("data-fc")); if (d) { d.style.display = d.style.display === "none" ? "block" : "none"; wireZoom(d); } }));
 }
 
+// ---------- Install Calendar (week board; assign installs to subcontractor crews) ----------
+let calAnchor = null;
+function idApi(action, extra) { return api("installer-day", Object.assign({ token: TOKEN, action }, extra || {})); }
+function ymd(d) { return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
+function addDays(s, n) { const d = new Date(s + "T12:00:00"); d.setDate(d.getDate() + n); return ymd(d); }
+function weekStartSun(s) { const d = new Date(s + "T12:00:00"); d.setDate(d.getDate() - d.getDay()); return ymd(d); }
+function timeShort(iso) { if (!iso) return ""; try { return new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); } catch (_e) { return ""; } }
+
+async function renderInstallCalendar() {
+  const main = $("main");
+  if (!calAnchor) calAnchor = ymd(new Date());
+  const wkStart = weekStartSun(calAnchor), wkEnd = addDays(wkStart, 6);
+  main.innerHTML = `<h2 class="sec">Install Calendar &#128197;</h2>
+    <p class="sub">Assign installs to your subcontractor crews — they see them instantly in the installer app. Click a block to unassign.</p>
+    <div class="saverow"><button class="btn" id="ic-prev">&#8249; Prev week</button><button class="btn" id="ic-today">This week</button><button class="btn" id="ic-next">Next week &#8250;</button> <span class="muted" id="ic-status">Week of ${esc(fmtDate(wkStart))}</span></div>
+    <div id="ic-grid" style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-top:12px"></div>
+    <h3 class="sec" style="margin-top:22px">Needs scheduling <span id="ic-poolN" class="muted"></span></h3>
+    <div id="ic-pool"><div class="muted">Loading&#8230;</div></div>`;
+  $("ic-prev").onclick = () => { calAnchor = addDays(wkStart, -7); renderInstallCalendar(); };
+  $("ic-next").onclick = () => { calAnchor = addDays(wkStart, 7); renderInstallCalendar(); };
+  $("ic-today").onclick = () => { calAnchor = ymd(new Date()); renderInstallCalendar(); };
+
+  const [asg, pool, roster] = await Promise.all([idApi("assignments", { from: wkStart, to: wkEnd }), idApi("unassigned_installs"), idApi("installers")]);
+  const installers = (roster && roster.installers) || [];
+  const byDay = {};
+  ((asg && asg.assignments) || []).forEach((a) => { const d = String(a.scheduled_start || "").slice(0, 10); (byDay[d] = byDay[d] || []).push(a); });
+  let html = "";
+  const todayStr = ymd(new Date());
+  for (let i = 0; i < 7; i++) {
+    const day = addDays(wkStart, i), d = new Date(day + "T12:00:00"), items = byDay[day] || [];
+    const isToday = day === todayStr;
+    html += `<div style="min-height:130px;border:1px solid ${isToday ? "var(--accent)" : "var(--line)"};border-radius:9px;padding:6px;background:var(--surface)">
+      <div style="font-size:11px;font-weight:700;color:${isToday ? "var(--accent)" : "var(--muted)"};line-height:1.2">${d.toLocaleDateString(undefined, { weekday: "short" })}<br>${d.getMonth() + 1}/${d.getDate()}</div>
+      ${items.map((a) => `<div data-asg="${esc(a.id)}" title="Click to unassign" style="margin-top:5px;padding:5px 6px;border-radius:6px;background:var(--grad);color:#06121f;font-size:11px;cursor:pointer;line-height:1.25"><b>${esc(timeShort(a.scheduled_start))}</b> ${esc(a.customer_name || "?")}<br>&#128119; ${esc(a.installer || "?")}</div>`).join("")}
+    </div>`;
+  }
+  $("ic-grid").innerHTML = html;
+  $("ic-grid").querySelectorAll("[data-asg]").forEach((c) => c.addEventListener("click", () => { if (confirm("Unassign this install from the calendar?")) idApi("unassign", { assignment_id: c.getAttribute("data-asg") }).then(() => renderInstallCalendar()); }));
+
+  const installs = (pool && pool.installs) || [];
+  $("ic-poolN").textContent = `(${installs.length})`;
+  const poolEl = $("ic-pool");
+  poolEl.innerHTML = installs.length ? installs.map((p, ix) => `<div class="card" style="padding:9px 12px;margin-bottom:7px">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+        <div><b>${esc(p.customer_name || "?")}</b> <span class="muted" style="font-size:12px">Job #${esc(p.job_number || "")} &middot; ${esc(p.address || "")}</span></div>
+        <button class="btn" data-assign="${ix}" style="padding:4px 12px;font-size:12px">Assign &#9662;</button>
+      </div>
+      <div id="ic-form-${ix}" style="display:none;margin-top:8px;gap:6px;flex-wrap:wrap;align-items:center">
+        <select id="ic-who-${ix}" style="padding:9px;border-radius:8px;background:var(--bg);color:var(--text);border:1px solid var(--line)">${installers.map((w) => `<option value="${esc(w.id)}">${esc(w.name)}${w.sub ? " (sub)" : ""}</option>`).join("")}</select>
+        <input type="date" id="ic-date-${ix}" value="${esc(calAnchor)}" style="padding:9px;border-radius:8px;background:var(--bg);color:var(--text);border:1px solid var(--line)"/>
+        <input type="time" id="ic-time-${ix}" value="08:00" style="padding:9px;border-radius:8px;background:var(--bg);color:var(--text);border:1px solid var(--line)"/>
+        <button class="btn primary" data-go="${ix}" style="padding:9px 14px;font-size:13px">Schedule</button>
+      </div>
+    </div>`).join("") : `<div class="muted">Nothing waiting — every install is scheduled. &#127881;</div>`;
+  poolEl.querySelectorAll("[data-assign]").forEach((b) => b.addEventListener("click", () => { const f = $("ic-form-" + b.getAttribute("data-assign")); f.style.display = f.style.display === "none" ? "flex" : "none"; }));
+  poolEl.querySelectorAll("[data-go]").forEach((b) => b.addEventListener("click", async () => {
+    const ix = b.getAttribute("data-go"), p = installs[ix];
+    const who = $("ic-who-" + ix).value, date = $("ic-date-" + ix).value, time = $("ic-time-" + ix).value;
+    if (!who || !date || !time) { alert("Pick a crew, date, and time."); return; }
+    b.disabled = true; b.textContent = "Scheduling…";
+    const r = await idApi("assign", { hcp_job_id: p.hcp_job_id, installer_id: who, scheduled_start: `${date}T${time}:00-05:00` });
+    if (r && r.ok) renderInstallCalendar(); else { b.disabled = false; b.textContent = "Schedule"; alert("Failed: " + ((r && r.error) || "error")); }
+  }));
+}
+
 function renderDashboard() {
   const main = $("main");
   const name = String(($("who").textContent || "").split("·")[0] || "").trim() || "there";
@@ -807,7 +873,7 @@ function renderDashboard() {
     <div class="tiles">${dashTile("margins", "📊", "Pricing", "Profit per matchup — cost+tax vs your live sell price; edit prices")}${dashTile("repairtiers", "🔧", "Repair tiers", "Repair level pricing the presentation app + brain use")}${dashTile("finance", "💳", "Financing", "Monthly-payment calculator + plans")}${dashTile("lineitems", "🧾", "Booking line items", "Default charges per booking type")}${dashTile("membership", "⭐", "Comfort Club", "Membership stats + tag sync")}</div>
     <div class="tilegroup">People</div>
     <div class="tiles">${dashTile("claude", "&#129302;", "Claude (Office)", "Ask the office assistant — installs, jobs, customers, rebates, compliance")}${dashTile("customers", "&#128100;", "Customers", "One customer, everything — profile, jobs, calls (recordings+transcripts), texts &amp; photos")}</div>
-    <div class="tiles">${dashTile("installtodo", "&#9989;", "Install To-Do", "Quick list of everything still outstanding across your installs")}${dashTile("installs", "&#127959;", "Installs", "Track every install — equipment, permit, QC, walkthrough, inspection, CPS rebate, warranty")}${dashTile("fieldcaptures", "&#128247;", "Field Captures", "Old-equipment photos techs captured on CPS installs + the $100 bonus/penalty payroll report")}</div>
+    <div class="tiles">${dashTile("installtodo", "&#9989;", "Install To-Do", "Quick list of everything still outstanding across your installs")}${dashTile("installs", "&#127959;", "Installs", "Track every install — equipment, permit, QC, walkthrough, inspection, CPS rebate, warranty")}${dashTile("fieldcaptures", "&#128247;", "Field Captures", "Old-equipment photos techs captured on CPS installs + the $100 bonus/penalty payroll report")}${dashTile("installcal", "&#128197;", "Install Calendar", "Week board — assign installs to your subcontractor crews; they see them in the installer app")}</div>
     <div class="tiles">${dashTile("team", "👷", "Technicians", "Your tech roster + re-sync their phone numbers from Housecall")}</div>
     <div class="tilegroup">System</div>
     <div class="tiles">${dashTile("tools", "🧰", "Claude's tools", "Everything the AI can do")}${dashTile("cleanup", "🧹", "Cleanup", "Suggested old data to prune")}${dashTile("health", "&#10084;", "Health", "Heartbeat + recent errors")}${dashTile("photos", "&#128247;", "Photos", "Every texted-in photo, by date")}</div>
