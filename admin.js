@@ -377,6 +377,7 @@ function statChip(color, label) { return `<span class="chiplive"><span class="do
 // tools) — completely separate from the dispatch phone assistant. Same staff token = same identity/role. ----
 let officeChat = [];   // [{role:'user'|'assistant', content}]
 let officeBusy = false;
+let officePendingImage = null;   // {media_type, b64} screenshot pasted/dropped/attached for the next send (Claude vision)
 const OFFICE_CHIP_HINT = "UI: if your reply asks me to confirm or choose, end with ONE final line exactly like '::CHIPS:: A | B | C' (2-4 short tap options, the literal text to send). Omit it for plain informational replies.";
 
 function renderOfficeChat() {
@@ -384,14 +385,26 @@ function renderOfficeChat() {
   m.innerHTML = `<h2 class="sec">Claude &#129302; <span class="muted" style="font-size:13px;font-weight:500">· Office assistant</span></h2>
     <p class="sub">Ask about installs, jobs, customers, rebates, and compliance. This is your OFFICE assistant — separate from the phone/dispatch assistant in the Chrome extension.</p>
     <div id="oc-scroll" style="border:1px solid var(--line);border-radius:12px;padding:14px;min-height:300px;max-height:56vh;overflow:auto;background:var(--surface)"></div>
-    <div class="saverow" style="margin-top:10px;gap:8px;flex-wrap:nowrap">
-      <input id="oc-input" type="text" placeholder="Ask the office assistant…" style="flex:1" autocomplete="off"/>
+    <div class="saverow" style="margin-top:10px;gap:8px;flex-wrap:nowrap;align-items:center">
+      <input id="oc-input" type="text" placeholder="Ask, or paste/drop a screenshot…" style="flex:1" autocomplete="off"/>
+      <button class="btn" id="oc-attach" title="Attach a screenshot or photo" style="padding:9px 12px">📎</button>
       <button class="btn primary" id="oc-send">Send</button>
     </div>
+    <input type="file" id="oc-file" accept="image/*" style="display:none"/>
+    <span id="oc-attach-preview" style="display:none;align-items:center;gap:6px;font-size:12px;color:var(--accent);margin-top:6px"></span>
     <div id="oc-chips" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px"></div>`;
   paintOfficeChat(false);
   $("oc-send").addEventListener("click", () => sendOfficeChat($("oc-input").value));
   $("oc-input").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); sendOfficeChat($("oc-input").value); } });
+  // Image input for Claude vision: paste, drop, or the paperclip. Downscaled to base64.
+  const _ocPrev = () => { const pv = $("oc-attach-preview"); if (!pv) return; if (officePendingImage) { pv.style.display = "inline-flex"; pv.innerHTML = `📎 image ready <a href="#" id="oc-attach-x" style="color:#f87171;text-decoration:none">✕</a>`; const x = $("oc-attach-x"); if (x) x.onclick = (e) => { e.preventDefault(); officePendingImage = null; _ocPrev(); }; } else { pv.style.display = "none"; pv.innerHTML = ""; } };
+  const _ocImg = (file) => { if (!file || !/^image\//.test(file.type)) return; const rdr = new FileReader(); rdr.onload = () => { const im = new Image(); im.onload = () => { const max = 1280; let w = im.width, h = im.height; if (w > max || h > max) { const s = Math.min(max/w, max/h); w = Math.round(w*s); h = Math.round(h*s); } const cv = document.createElement("canvas"); cv.width = w; cv.height = h; cv.getContext("2d").drawImage(im, 0, 0, w, h); officePendingImage = { media_type: "image/jpeg", b64: cv.toDataURL("image/jpeg", 0.72).split(",")[1] }; _ocPrev(); }; im.src = rdr.result; }; rdr.readAsDataURL(file); };
+  $("oc-attach").addEventListener("click", () => $("oc-file").click());
+  $("oc-file").addEventListener("change", (e) => { const f = e.target.files && e.target.files[0]; if (f) _ocImg(f); e.target.value = ""; });
+  $("oc-input").addEventListener("paste", (e) => { const items = (e.clipboardData || {}).items || []; for (const it of items) { if (it.type && it.type.indexOf("image") === 0) { const f = it.getAsFile(); if (f) { e.preventDefault(); _ocImg(f); break; } } } });
+  $("oc-input").addEventListener("dragover", (e) => e.preventDefault());
+  $("oc-input").addEventListener("drop", (e) => { const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]; if (f && /^image\//.test(f.type)) { e.preventDefault(); _ocImg(f); } });
+  _ocPrev();
   $("oc-input").focus();
 }
 
@@ -410,16 +423,21 @@ function paintOfficeChat(thinking) {
 
 async function sendOfficeChat(text) {
   text = (text || "").trim();
-  if (!text || officeBusy) return;
+  const img = officePendingImage;
+  if ((!text && !img) || officeBusy) return;
   officeBusy = true;
   $("oc-input").value = "";
   $("oc-chips").innerHTML = "";
-  officeChat.push({ role: "user", content: text });
+  officePendingImage = null; const _pv = $("oc-attach-preview"); if (_pv) { _pv.style.display = "none"; _pv.innerHTML = ""; }
+  officeChat.push({ role: "user", content: text || "📎 (screenshot)" });
   paintOfficeChat(true);
   let reply = "(no response)";
   try {
     // surface:'office' => backend scopes the toolbox to the office set. token => identity + admin role.
-    const r = await api("claude-chat", { token: TOKEN, surface: "office", pageContext: OFFICE_CHIP_HINT, messages: officeChat.map((x) => ({ role: x.role, content: x.content })) });
+    const sendMessages = officeChat.map((x) => ({ role: x.role, content: x.content }));
+    // Attach the screenshot to the OUTGOING last user message only (kept out of stored history so it is not re-sent).
+    if (img) { let li = -1; for (let i = sendMessages.length - 1; i >= 0; i--) { if (sendMessages[i].role === "user") { li = i; break; } } if (li >= 0) sendMessages[li] = { role: "user", content: [{ type: "text", text: text || "What's in this screenshot? Help me with it." }, { type: "image", source: { type: "base64", media_type: img.media_type, data: img.b64 } }] }; }
+    const r = await api("claude-chat", { token: TOKEN, surface: "office", pageContext: OFFICE_CHIP_HINT, messages: sendMessages });
     reply = (r && (r.reply || r.error)) || "(no response)";
   } catch (e) { reply = "Network error — try again."; }
   let chips = [];

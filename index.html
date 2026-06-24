@@ -4,10 +4,10 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>Carnes &amp; Sons — Office Console</title>
-<link rel="manifest" href="manifest.webmanifest?v=1.8.2"/>
+<link rel="manifest" href="manifest.webmanifest"/>
 <meta name="theme-color" content="#0b1120"/>
-<link rel="icon" type="image/png" href="ofc-icon-192.png"/>
-<link rel="apple-touch-icon" href="ofc-icon-180.png"/>
+<link rel="icon" type="image/png" href="icon-192.png"/>
+<link rel="apple-touch-icon" href="icon-180.png"/>
 <style>
   :root{--bg:#0b1120;--surface:#121a2b;--surface2:#1a2436;--line:#26324a;--line2:#374a66;--text:#e8eef7;--muted:#9fb0c7;--faint:#5f7187;--accent:#34d3ee;--grad:linear-gradient(135deg,#22d3ee,#3b82f6);--danger:#f43f5e;--warn:#fbbf24;--success:#34d399}
   *{box-sizing:border-box}
@@ -162,7 +162,7 @@
 // SKIP_WAITING so it activates, then controllerchange reloads to the fresh version. Also polls hourly +
 // on tab refocus, and the header "Check for update" button forces a check on demand.
 (function () {
-  var VERSION = "1.8.3";  // keep in lockstep with sw V + the admin.js?v= query
+  var VERSION = "1.8.1";  // keep in lockstep with sw V + the admin.js?v= query
   var vEl = document.getElementById("cs-ver"); if (vEl) vEl.textContent = "v" + VERSION;
   function showUpd() { var b = document.getElementById("update-banner"); if (b) b.style.display = "flex"; }
   if (!("serviceWorker" in navigator)) return;
@@ -197,6 +197,6 @@
   }).catch(function () {});
 })();
 </script>
-<script src="admin.js?v=1.8.3"></script>
+<script src="admin.js?v=1.8.1"></script>
 </body>
 </html>
