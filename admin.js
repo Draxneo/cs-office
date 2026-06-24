@@ -143,6 +143,7 @@ function render(pane) {
   if (pane === "leads") return renderLeads();
   if (pane === "aps") return renderAps();
   if (pane === "rebates") return renderRebates();
+  if (pane === "fieldcaptures") return renderFieldCaptures();
   if (pane === "pricebook") return renderPricebook();
   if (pane === "apilog") return renderApiLog();
   if (pane === "callsearch") return renderCallSearch();
@@ -750,6 +751,48 @@ function wireZoom(container) {
   container.querySelectorAll("[data-zoom]").forEach((img) => img.addEventListener("click", () => openLightbox(img.getAttribute("data-zoom"))));
 }
 
+// ---------- Field Captures (CPS old-equipment) + payroll bonus/penalty report ----------
+function fcApi(action) { return api("field-capture", { token: TOKEN, action }); }
+async function renderFieldCaptures() {
+  const main = $("main");
+  main.innerHTML = `<h2 class="sec">Field Captures &#128247;</h2>
+    <p class="sub">Old-equipment photos your techs captured on CPS installs (for the Early Replacement rebate). Complete = all 3 plates (model+serial) + age + operational. Each complete capture is a <b>$100 tech bonus</b>; an incomplete submitted one is a <b>$100 penalty</b>.</p>
+    <div class="saverow"><button class="btn" id="fc-refresh">Refresh</button> <span class="muted" id="fc-status">Loading&#8230;</span></div>
+    <div id="fc-report" style="margin-top:12px"></div>
+    <div id="fc-list" style="margin-top:14px"></div>`;
+  $("fc-refresh").addEventListener("click", renderFieldCaptures);
+  const [rep, lst] = await Promise.all([fcApi("report"), fcApi("list")]);
+  // ---- payroll report ----
+  const rep$ = $("fc-report");
+  if (rep && rep.ok && rep.rows && rep.rows.length) {
+    const net = rep.rows.reduce((a, r) => a + r.net, 0);
+    rep$.innerHTML = `<div class="card"><h3 style="margin:0 0 8px;font-size:15px">Payroll — bonus / penalty by tech</h3>
+      <table style="width:100%;border-collapse:collapse;font-size:13px">
+        <tr style="text-align:left;color:var(--muted)"><th style="padding:6px 4px">Tech</th><th>Complete</th><th>Incomplete</th><th style="text-align:right">Bonus</th><th style="text-align:right">Penalty</th><th style="text-align:right">Net</th></tr>
+        ${rep.rows.map((r) => `<tr style="border-top:1px solid var(--line)"><td style="padding:7px 4px"><b>${esc(r.tech)}</b></td><td>${r.complete}</td><td>${r.incomplete}</td><td style="text-align:right;color:#34d399">$${r.bonus}</td><td style="text-align:right;color:#fda4af">$${r.penalty}</td><td style="text-align:right;font-weight:700;color:${r.net >= 0 ? "#34d399" : "#fda4af"}">${r.net < 0 ? "-$" + Math.abs(r.net) : "$" + r.net}</td></tr>`).join("")}
+        <tr style="border-top:2px solid var(--line)"><td style="padding:7px 4px" colspan="5"><b>Total net</b></td><td style="text-align:right;font-weight:800;color:${net >= 0 ? "#34d399" : "#fda4af"}">${net < 0 ? "-$" + Math.abs(net) : "$" + net}</td></tr>
+      </table>
+      <div class="faint" style="font-size:11px;margin-top:6px">Counts SUBMITTED captures only. Copy these figures into payroll.</div></div>`;
+  } else { rep$.innerHTML = `<div class="card"><div class="muted">No submitted captures yet — the payroll tally appears once techs start submitting.</div></div>`; }
+  // ---- captures list ----
+  const list$ = $("fc-list"); const caps = (lst && lst.captures) || [];
+  $("fc-status").textContent = `${caps.length} capture${caps.length === 1 ? "" : "s"}`;
+  if (!caps.length) { list$.innerHTML = `<div class="muted">No field captures yet. They appear here when a CPS install is booked and the tech gets the texted capture link.</div>`; return; }
+  const statusPill = (c) => c.status === "submitted" ? (c.complete ? custBadge("✓ complete", "rgba(52,211,153,.16)") : custBadge("incomplete", "rgba(244,63,94,.16)")) : (c.status === "opened" ? custBadge("opened", "rgba(251,191,36,.16)") : custBadge("sent"));
+  const plate = (label, m, s, p) => `<div style="flex:1;min-width:150px"><div class="muted" style="font-size:11px">${label}</div>${p ? `<img src="${esc(p)}" data-zoom="${esc(p)}" loading="lazy" style="width:100%;height:96px;object-fit:cover;border-radius:8px;cursor:zoom-in;background:var(--surface2)"/>` : `<div style="height:96px;border-radius:8px;background:var(--surface2);display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:11px">no photo</div>`}<div style="font-size:12px;margin-top:3px"><b>${esc(m || "—")}</b></div><div class="muted" style="font-size:11px">SN: ${esc(s || "—")}</div></div>`;
+  list$.innerHTML = caps.map((c, i) => `<div class="card" style="padding:11px 13px;margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;cursor:pointer" data-fc="${i}">
+        <div><b>${esc(c.customer_name || "(customer)")}</b>${c.job_number ? ` &middot; Job #${esc(c.job_number)}` : ""} <span class="muted" style="font-size:12px">&middot; ${esc(c.tech_name || "unassigned")}</span></div>
+        <div>${statusPill(c)} <span class="muted" style="font-size:11px">${c.submitted_at ? fmtDate(c.submitted_at) : (c.sent_at ? "sent " + fmtDate(c.sent_at) : "")}</span></div>
+      </div>
+      <div id="fc-d-${i}" style="display:none;margin-top:10px">
+        <div style="display:flex;gap:10px;flex-wrap:wrap">${plate("Condenser", c.old_outdoor_model, c.old_outdoor_serial, c.old_outdoor_photo)}${plate("Coil", c.old_indoor_model, c.old_indoor_serial, c.old_indoor_photo)}${plate("Furnace", c.old_furnace_model, c.old_furnace_serial, c.old_furnace_photo)}</div>
+        <div class="muted" style="font-size:12px;margin-top:8px">Age: ${esc(c.system_age || "—")} yrs &middot; Operational: ${c.operational === true ? "Yes" : c.operational === false ? "No" : "—"}${c.hp_type ? " &middot; " + esc(c.hp_type.replace("_", " ")) : ""}</div>
+      </div>
+    </div>`).join("");
+  list$.querySelectorAll("[data-fc]").forEach((row) => row.addEventListener("click", () => { const d = $("fc-d-" + row.getAttribute("data-fc")); if (d) { d.style.display = d.style.display === "none" ? "block" : "none"; wireZoom(d); } }));
+}
+
 function renderDashboard() {
   const main = $("main");
   const name = String(($("who").textContent || "").split("·")[0] || "").trim() || "there";
@@ -764,7 +807,7 @@ function renderDashboard() {
     <div class="tiles">${dashTile("margins", "📊", "Pricing", "Profit per matchup — cost+tax vs your live sell price; edit prices")}${dashTile("repairtiers", "🔧", "Repair tiers", "Repair level pricing the presentation app + brain use")}${dashTile("finance", "💳", "Financing", "Monthly-payment calculator + plans")}${dashTile("lineitems", "🧾", "Booking line items", "Default charges per booking type")}${dashTile("membership", "⭐", "Comfort Club", "Membership stats + tag sync")}</div>
     <div class="tilegroup">People</div>
     <div class="tiles">${dashTile("claude", "&#129302;", "Claude (Office)", "Ask the office assistant — installs, jobs, customers, rebates, compliance")}${dashTile("customers", "&#128100;", "Customers", "One customer, everything — profile, jobs, calls (recordings+transcripts), texts &amp; photos")}</div>
-    <div class="tiles">${dashTile("installtodo", "&#9989;", "Install To-Do", "Quick list of everything still outstanding across your installs")}${dashTile("installs", "&#127959;", "Installs", "Track every install — equipment, permit, QC, walkthrough, inspection, CPS rebate, warranty")}</div>
+    <div class="tiles">${dashTile("installtodo", "&#9989;", "Install To-Do", "Quick list of everything still outstanding across your installs")}${dashTile("installs", "&#127959;", "Installs", "Track every install — equipment, permit, QC, walkthrough, inspection, CPS rebate, warranty")}${dashTile("fieldcaptures", "&#128247;", "Field Captures", "Old-equipment photos techs captured on CPS installs + the $100 bonus/penalty payroll report")}</div>
     <div class="tiles">${dashTile("team", "👷", "Technicians", "Your tech roster + re-sync their phone numbers from Housecall")}</div>
     <div class="tilegroup">System</div>
     <div class="tiles">${dashTile("tools", "🧰", "Claude's tools", "Everything the AI can do")}${dashTile("cleanup", "🧹", "Cleanup", "Suggested old data to prune")}${dashTile("health", "&#10084;", "Health", "Heartbeat + recent errors")}${dashTile("photos", "&#128247;", "Photos", "Every texted-in photo, by date")}</div>
