@@ -2271,16 +2271,52 @@ async function renderMembership() {
         <button class="btn primary" id="mem-sync">🏷️ Sync tags in Housecall Pro</button>
       </div>
       <div class="out" id="mem-out"></div>
+    </div>
+    <div class="card">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
+        <div id="mem-tabs" style="display:flex;gap:6px;flex-wrap:wrap"></div>
+        <input id="mem-search" placeholder="Search name…" style="flex:1;min-width:160px;padding:9px 11px;border-radius:9px;background:var(--bg);color:var(--text);border:1px solid var(--line)"/>
+      </div>
+      <div id="mem-list"><div class="muted">Loading members…</div></div>
     </div>`;
   $("mem-scan").addEventListener("click", () => runMem("membership_scan", "mem-scan", "Scanning…"));
   $("mem-sync").addEventListener("click", () => runMem("membership_sync", "mem-sync", "Syncing…"));
+
+  // ---- member list: status tabs + search, each row deep-links to the Housecall customer record ----
+  let memFilter = "active", memRows = [];
+  const TABS = [["active","Active"],["expired","Expired"],["rejected","Rejected"],["all","All"]];
+  const pill = (st) => { const c = st==="active" ? "background:rgba(52,211,153,.16);color:#a7f3d0" : st==="expired" ? "background:rgba(255,255,255,.07);color:var(--muted)" : st==="rejected" ? "background:rgba(244,63,94,.16);color:#fda4af" : "background:rgba(251,191,36,.16);color:#fde68a"; return `<span style="font-size:11px;padding:2px 9px;border-radius:999px;${c}">${esc(st)}</span>`; };
+  function paintTabs(){
+    $("mem-tabs").innerHTML = TABS.map(([k,l]) => `<button data-mt="${k}" style="cursor:pointer;padding:7px 13px;font-size:13px;font-weight:700;border-radius:9px;border:1px solid var(--line);background:${k===memFilter?'var(--accent)':'transparent'};color:${k===memFilter?'#06121f':'var(--text)'}">${l}</button>`).join("");
+    $("mem-tabs").querySelectorAll("[data-mt]").forEach(b => b.onclick = () => { memFilter = b.getAttribute("data-mt"); paintTabs(); loadMembers(); });
+  }
+  function paintList(){
+    const q = ($("mem-search").value || "").toLowerCase().trim();
+    const rows = memRows.filter(r => !q || String(r.customer_name||"").toLowerCase().includes(q));
+    if(!rows.length){ $("mem-list").innerHTML = `<div class="muted">No members${q?" match that search":""}.</div>`; return; }
+    $("mem-list").innerHTML = `<div class="muted" style="font-size:12px;margin-bottom:6px">${rows.length} shown</div>` + rows.map(r => {
+      const url = r.hcp_customer_id ? `https://pro.housecallpro.com/app/customers/${esc(r.hcp_customer_id)}` : "";
+      return `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 2px;border-top:1px solid var(--line)">
+        <div style="min-width:0"><div><b>${esc(r.customer_name||"(no name)")}</b> ${pill(r.status)}</div><div class="muted" style="font-size:12px">${esc(r.source||"install")}${r.start_date?" · installed "+esc(r.start_date):""}${r.end_date?" · expires "+esc(r.end_date):""}</div></div>
+        ${url?`<a href="${url}" target="_blank" rel="noopener" style="flex:none;text-decoration:none;padding:7px 12px;font-size:13px;font-weight:700;border-radius:9px;border:1px solid var(--line);background:transparent;color:var(--text);white-space:nowrap">Open in Housecall ↗</a>`:`<span class="muted" style="font-size:11px">no HCP id</span>`}
+      </div>`;
+    }).join("");
+  }
+  async function loadMembers(){
+    $("mem-list").innerHTML = `<div class="muted">Loading members…</div>`;
+    const r = await hub("membership_list", { status: memFilter });
+    memRows = (r && r.members) || [];
+    paintList();
+  }
+  $("mem-search").addEventListener("input", paintList);
+  paintTabs(); loadMembers();
 }
 async function runMem(action, btnId, busy) {
   const b = $(btnId); const label = b.textContent; b.disabled = true; b.textContent = busy;
   const r = await hub(action);
   b.disabled = false; b.textContent = label;
   showOut("mem-out", JSON.stringify((r && r.result) || r, null, 2));
-  const s = await hub("membership_stats");
+  setTimeout(renderMembership, 1500);  // refresh stats + member list after a scan/sync
 }
 
 // ---------- Team ----------
