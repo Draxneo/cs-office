@@ -801,6 +801,9 @@ function ymd(d) { return d.getFullYear() + "-" + String(d.getMonth() + 1).padSta
 function addDays(s, n) { const d = new Date(s + "T12:00:00"); d.setDate(d.getDate() + n); return ymd(d); }
 function weekStartSun(s) { const d = new Date(s + "T12:00:00"); d.setDate(d.getDate() - d.getDay()); return ymd(d); }
 function timeShort(iso) { if (!iso) return ""; try { return new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); } catch (_e) { return ""; } }
+// Stable color per crew (like Housecall's "color by employee") so each installer's blocks are recognizable.
+const CREW_COLORS = ["#2563eb", "#dc2626", "#16a34a", "#9333ea", "#ea580c", "#0891b2", "#db2777", "#65a30d", "#4f46e5", "#0d9488", "#b45309", "#be123c"];
+function crewColor(id) { if (!id) return "#64748b"; let h = 0; const s = String(id); for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return CREW_COLORS[h % CREW_COLORS.length]; }
 
 async function renderInstallCalendar() {
   const main = $("main");
@@ -809,6 +812,7 @@ async function renderInstallCalendar() {
   main.innerHTML = `<h2 class="sec">Install Calendar &#128197;</h2>
     <p class="sub">Assign installs to your subcontractor crews — they see them instantly in the installer app. Click a block to unassign.</p>
     <div class="saverow"><button class="btn" id="ic-prev">&#8249; Prev week</button><button class="btn" id="ic-today">This week</button><button class="btn" id="ic-next">Next week &#8250;</button> <span class="muted" id="ic-status">Week of ${esc(fmtDate(wkStart))}</span></div>
+    <div id="ic-legend" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px"></div>
     <div id="ic-grid" style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-top:12px"></div>
     <h3 class="sec" style="margin-top:22px">Needs scheduling <span id="ic-poolN" class="muted"></span></h3>
     <div id="ic-pool"><div class="muted">Loading&#8230;</div></div>`;
@@ -818,8 +822,13 @@ async function renderInstallCalendar() {
 
   const [asg, pool, roster] = await Promise.all([idApi("assignments", { from: wkStart, to: wkEnd }), idApi("unassigned_installs"), idApi("installers")]);
   const installers = (roster && roster.installers) || [];
+  const allAsg = (asg && asg.assignments) || [];
   const byDay = {};
-  ((asg && asg.assignments) || []).forEach((a) => { const d = String(a.scheduled_start || "").slice(0, 10); (byDay[d] = byDay[d] || []).push(a); });
+  allAsg.forEach((a) => { const d = String(a.scheduled_start || "").slice(0, 10); (byDay[d] = byDay[d] || []).push(a); });
+  // crew legend (distinct crews on the board this week)
+  const crews = {}; allAsg.forEach((a) => { if (a.installer_id) crews[a.installer_id] = a.installer; });
+  const leg = $("ic-legend");
+  if (leg) leg.innerHTML = Object.keys(crews).length ? Object.keys(crews).map((id) => `<span style="display:inline-flex;align-items:center;gap:5px;font-size:12px"><span style="width:12px;height:12px;border-radius:3px;background:${crewColor(id)};display:inline-block"></span>${esc(crews[id] || "?")}</span>`).join("") : `<span class="muted" style="font-size:12px">No installs scheduled this week yet.</span>`;
   let html = "";
   const todayStr = ymd(new Date());
   for (let i = 0; i < 7; i++) {
@@ -827,7 +836,7 @@ async function renderInstallCalendar() {
     const isToday = day === todayStr;
     html += `<div style="min-height:130px;border:1px solid ${isToday ? "var(--accent)" : "var(--line)"};border-radius:9px;padding:6px;background:var(--surface)">
       <div style="font-size:11px;font-weight:700;color:${isToday ? "var(--accent)" : "var(--muted)"};line-height:1.2">${d.toLocaleDateString(undefined, { weekday: "short" })}<br>${d.getMonth() + 1}/${d.getDate()}</div>
-      ${items.map((a) => `<div data-asg="${esc(a.id)}" title="Click to unassign" style="margin-top:5px;padding:5px 6px;border-radius:6px;background:var(--grad);color:#06121f;font-size:11px;cursor:pointer;line-height:1.25"><b>${esc(timeShort(a.scheduled_start))}</b> ${esc(a.customer_name || "?")}<br>&#128119; ${esc(a.installer || "?")}</div>`).join("")}
+      ${items.map((a) => `<div data-asg="${esc(a.id)}" title="Click to unassign" style="margin-top:5px;padding:5px 6px;border-radius:6px;background:${crewColor(a.installer_id)};color:#fff;font-size:11px;cursor:pointer;line-height:1.25"><b>${esc(timeShort(a.scheduled_start))}</b> ${esc(a.customer_name || "?")}${a.description ? `<div style="opacity:.92;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(a.description)}</div>` : ""}<div style="opacity:.85;font-size:10px">&#128119; ${esc(a.installer || "?")}${a.job_number ? " &middot; #" + esc(a.job_number) : ""}</div></div>`).join("")}
     </div>`;
   }
   $("ic-grid").innerHTML = html;
