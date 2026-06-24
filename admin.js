@@ -805,17 +805,40 @@ function timeShort(iso) { if (!iso) return ""; try { return new Date(iso).toLoca
 const CREW_COLORS = ["#2563eb", "#dc2626", "#16a34a", "#9333ea", "#ea580c", "#0891b2", "#db2777", "#65a30d", "#4f46e5", "#0d9488", "#b45309", "#be123c"];
 function crewColor(id) { if (!id) return "#64748b"; let h = 0; const s = String(id); for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return CREW_COLORS[h % CREW_COLORS.length]; }
 
+// ---- Install Calendar (HCP-style): slide-out Unscheduled rail + drag-and-drop + hover cards ----
+// icDrag carries what's being dragged: {type:'new', job} from the rail, or {type:'move', asg} from a block.
+let icDrag = null;
+// One-time CSS for the rail drawer, drop highlight, hover tip, and the confirm popover.
+function ensureCalStyles() {
+  if (document.getElementById("ic-styles")) return;
+  const s = document.createElement("style"); s.id = "ic-styles";
+  s.textContent =
+    ".ic-rail{position:fixed;top:0;left:0;height:100vh;width:300px;max-width:85vw;background:var(--surface);border-right:1px solid var(--line);box-shadow:2px 0 18px rgba(0,0,0,.35);transform:translateX(-100%);transition:transform .22s ease;z-index:60;display:flex;flex-direction:column}" +
+    ".ic-rail.open{transform:translateX(0)}" +
+    ".ic-rail-hd{padding:12px 14px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;font-weight:700}" +
+    ".ic-rail-body{overflow:auto;padding:10px;flex:1}" +
+    ".ic-railcard{cursor:grab}.ic-railcard:active{cursor:grabbing}" +
+    ".ic-block{cursor:grab}.ic-block:active{cursor:grabbing}" +
+    ".ic-daycell.drop-hot{outline:2px dashed var(--accent);outline-offset:-2px;background:rgba(59,130,246,.10)}" +
+    ".ic-tip{position:fixed;z-index:80;max-width:280px;background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.4);padding:10px 12px;font-size:12px;line-height:1.45;display:none}" +
+    ".ic-pop{position:fixed;z-index:90;background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.45);padding:12px;width:240px;display:none}" +
+    ".ic-pop select,.ic-pop input{width:100%;padding:8px;border-radius:8px;background:var(--bg);color:var(--text);border:1px solid var(--line);box-sizing:border-box}" +
+    ".ic-backdrop{position:fixed;inset:0;z-index:55;background:rgba(0,0,0,.25);display:none}";
+  document.head.appendChild(s);
+}
+// HH:MM (24h, local) from an ISO timestamp — to prefill the time input when moving a block.
+function clockHHMM(iso) { if (!iso) return "08:00"; try { const d = new Date(iso); return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0"); } catch (_e) { return "08:00"; } }
+
 async function renderInstallCalendar() {
+  ensureCalStyles();
   const main = $("main");
   if (!calAnchor) calAnchor = ymd(new Date());
   const wkStart = weekStartSun(calAnchor), wkEnd = addDays(wkStart, 6);
   main.innerHTML = `<h2 class="sec">Install Calendar &#128197;</h2>
-    <p class="sub">Assign installs to your subcontractor crews — they see them instantly in the installer app. Click a block to unassign.</p>
-    <div class="saverow"><button class="btn" id="ic-prev">&#8249; Prev week</button><button class="btn" id="ic-today">This week</button><button class="btn" id="ic-next">Next week &#8250;</button> <span class="muted" id="ic-status">Week of ${esc(fmtDate(wkStart))}</span></div>
+    <p class="sub">Drag a job from the <b>Unscheduled</b> drawer onto a day to schedule it. Drag a block to another day to move it. Hover a block for details. Crews see changes instantly in the installer app.</p>
+    <div class="saverow"><button class="btn primary" id="ic-railbtn">&#128229; Unscheduled <span id="ic-poolN" class="muted"></span></button> <button class="btn" id="ic-prev">&#8249; Prev</button><button class="btn" id="ic-today">This week</button><button class="btn" id="ic-next">Next &#8250;</button> <span class="muted" id="ic-status">Week of ${esc(fmtDate(wkStart))}</span></div>
     <div id="ic-legend" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px"></div>
-    <div id="ic-grid" style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-top:12px"></div>
-    <h3 class="sec" style="margin-top:22px">Needs scheduling <span id="ic-poolN" class="muted"></span></h3>
-    <div id="ic-pool"><div class="muted">Loading&#8230;</div></div>`;
+    <div id="ic-grid" style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-top:12px"></div>`;
   $("ic-prev").onclick = () => { calAnchor = addDays(wkStart, -7); renderInstallCalendar(); };
   $("ic-next").onclick = () => { calAnchor = addDays(wkStart, 7); renderInstallCalendar(); };
   $("ic-today").onclick = () => { calAnchor = ymd(new Date()); renderInstallCalendar(); };
@@ -823,49 +846,107 @@ async function renderInstallCalendar() {
   const [asg, pool, roster] = await Promise.all([idApi("assignments", { from: wkStart, to: wkEnd }), idApi("unassigned_installs"), idApi("installers")]);
   const installers = (roster && roster.installers) || [];
   const allAsg = (asg && asg.assignments) || [];
+  const installs = (pool && pool.installs) || [];
   const byDay = {};
   allAsg.forEach((a) => { const d = String(a.scheduled_start || "").slice(0, 10); (byDay[d] = byDay[d] || []).push(a); });
-  // crew legend (distinct crews on the board this week)
   const crews = {}; allAsg.forEach((a) => { if (a.installer_id) crews[a.installer_id] = a.installer; });
   const leg = $("ic-legend");
   if (leg) leg.innerHTML = Object.keys(crews).length ? Object.keys(crews).map((id) => `<span style="display:inline-flex;align-items:center;gap:5px;font-size:12px"><span style="width:12px;height:12px;border-radius:3px;background:${crewColor(id)};display:inline-block"></span>${esc(crews[id] || "?")}</span>`).join("") : `<span class="muted" style="font-size:12px">No installs scheduled this week yet.</span>`;
+
+  // Floating helpers (tip + confirm popover + backdrop + rail) — recreated each render; cleared first.
+  document.querySelectorAll(".ic-tip,.ic-pop,.ic-backdrop,.ic-rail").forEach((e) => e.remove());
+  const tip = document.createElement("div"); tip.className = "ic-tip"; document.body.appendChild(tip);
+  const backdrop = document.createElement("div"); backdrop.className = "ic-backdrop"; document.body.appendChild(backdrop);
+  const pop = document.createElement("div"); pop.className = "ic-pop"; document.body.appendChild(pop);
+  const hideTip = () => { tip.style.display = "none"; };
+  const closePop = () => { pop.style.display = "none"; backdrop.style.display = "none"; };
+  backdrop.addEventListener("click", closePop);
+
+  // The confirm step Clint asked for: every drop opens this little popover (crew + time prefilled) and
+  // nothing is written until "Schedule"/"Move" is clicked. mode 'new' => assign (insert); 'move' => reschedule.
+  function openPopover(x, y, opts) {
+    const crewOpts = installers.map((w) => `<option value="${esc(w.id)}"${String(opts.crewId) === String(w.id) ? " selected" : ""}>${esc(w.name)}${w.sub ? " (sub)" : ""}</option>`).join("");
+    pop.innerHTML = `<div style="font-weight:700;font-size:13px">${opts.mode === "move" ? "Move install" : "Schedule install"}</div>
+      <div class="muted" style="font-size:12px;margin-top:2px">${esc(opts.title || "")}</div>
+      <div class="muted" style="font-size:12px;margin-top:4px">&#128197; ${esc(fmtDate(opts.dayDate))}</div>
+      <label style="font-size:11px;color:var(--muted);display:block;margin-top:8px">Crew</label><select id="ic-pc">${crewOpts}</select>
+      <label style="font-size:11px;color:var(--muted);display:block;margin-top:8px">Arrival time</label><input id="ic-pt" type="time" value="${esc(opts.time || "08:00")}"/>
+      <div style="display:flex;gap:6px;margin-top:12px"><button class="btn primary" id="ic-pgo" style="flex:1">${opts.mode === "move" ? "Move" : "Schedule"}</button><button class="btn" id="ic-pcancel">Cancel</button></div>`;
+    pop.style.left = Math.max(8, Math.min(x, window.innerWidth - 256)) + "px";
+    pop.style.top = Math.max(8, Math.min(y, window.innerHeight - 240)) + "px";
+    pop.style.display = "block"; backdrop.style.display = "block";
+    $("ic-pcancel").onclick = closePop;
+    $("ic-pgo").onclick = async () => {
+      const who = $("ic-pc").value, time = $("ic-pt").value || "08:00";
+      const scheduled_start = `${opts.dayDate}T${time}:00-05:00`;
+      const go = $("ic-pgo"); go.disabled = true; go.textContent = "Saving…";
+      const r = opts.mode === "move"
+        ? await idApi("reschedule", { assignment_id: opts.assignment_id, installer_id: who, scheduled_start })
+        : await idApi("assign", { hcp_job_id: opts.hcp_job_id, installer_id: who, scheduled_start });
+      if (r && r.ok) { closePop(); renderInstallCalendar(); }
+      else { go.disabled = false; go.textContent = opts.mode === "move" ? "Move" : "Schedule"; alert("Failed: " + ((r && r.error) || "error")); }
+    };
+  }
+
+  // Week grid: each day is a drop target; each install is a draggable block.
   let html = "";
   const todayStr = ymd(new Date());
   for (let i = 0; i < 7; i++) {
     const day = addDays(wkStart, i), d = new Date(day + "T12:00:00"), items = byDay[day] || [];
     const isToday = day === todayStr;
-    html += `<div style="min-height:130px;border:1px solid ${isToday ? "var(--accent)" : "var(--line)"};border-radius:9px;padding:6px;background:var(--surface)">
+    html += `<div class="ic-daycell" data-day="${day}" style="min-height:130px;border:1px solid ${isToday ? "var(--accent)" : "var(--line)"};border-radius:9px;padding:6px;background:var(--surface)">
       <div style="font-size:11px;font-weight:700;color:${isToday ? "var(--accent)" : "var(--muted)"};line-height:1.2">${d.toLocaleDateString(undefined, { weekday: "short" })}<br>${d.getMonth() + 1}/${d.getDate()}</div>
-      ${items.map((a) => `<div data-asg="${esc(a.id)}" title="Click to unassign" style="margin-top:5px;padding:5px 6px;border-radius:6px;background:${crewColor(a.installer_id)};color:#fff;font-size:11px;cursor:pointer;line-height:1.25"><b>${esc(timeShort(a.scheduled_start))}</b> ${esc(a.customer_name || "?")}${a.description ? `<div style="opacity:.92;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(a.description)}</div>` : ""}<div style="opacity:.85;font-size:10px">&#128119; ${esc(a.installer || "?")}${a.job_number ? " &middot; #" + esc(a.job_number) : ""}</div></div>`).join("")}
+      ${items.map((a) => `<div class="ic-block" draggable="true" data-asg="${esc(a.id)}" style="margin-top:5px;padding:5px 6px;border-radius:6px;background:${crewColor(a.installer_id)};color:#fff;font-size:11px;line-height:1.25"><b>${esc(timeShort(a.scheduled_start))}</b> ${esc(a.customer_name || "?")}<div style="opacity:.85;font-size:10px">&#128119; ${esc(a.installer || "?")}${a.job_number ? " &middot; #" + esc(a.job_number) : ""}</div></div>`).join("")}
     </div>`;
   }
   $("ic-grid").innerHTML = html;
-  $("ic-grid").querySelectorAll("[data-asg]").forEach((c) => c.addEventListener("click", () => { if (confirm("Unassign this install from the calendar?")) idApi("unassign", { assignment_id: c.getAttribute("data-asg") }).then(() => renderInstallCalendar()); }));
+  const asgById = {}; allAsg.forEach((a) => { asgById[a.id] = a; });
 
-  const installs = (pool && pool.installs) || [];
+  // Blocks: draggable to move + hover detail card (with an Unassign action).
+  $("ic-grid").querySelectorAll(".ic-block").forEach((el) => {
+    const a = asgById[el.getAttribute("data-asg")];
+    el.addEventListener("dragstart", () => { icDrag = { type: "move", asg: a }; hideTip(); });
+    el.addEventListener("dragend", () => { icDrag = null; });
+    el.addEventListener("mouseenter", () => {
+      tip.innerHTML = `<b>${esc(a.customer_name || "?")}</b>${a.job_number ? ` <span class="muted">#${esc(a.job_number)}</span>` : ""}<br><span class="muted">${esc(timeShort(a.scheduled_start))} &middot; &#128119; ${esc(a.installer || "?")}</span>${a.description ? `<br>${esc(a.description)}` : ""}${a.note ? `<br><i>${esc(a.note)}</i>` : ""}<br><a href="#" id="ic-unassign" style="color:#f87171">Unassign</a>`;
+      const r = el.getBoundingClientRect();
+      tip.style.left = Math.min(r.left, window.innerWidth - 290) + "px"; tip.style.top = (r.bottom + 6) + "px"; tip.style.display = "block";
+      const un = $("ic-unassign"); if (un) un.onclick = (ev) => { ev.preventDefault(); hideTip(); if (confirm("Unassign this install? It goes back to the Unscheduled drawer.")) idApi("unassign", { assignment_id: a.id }).then(() => renderInstallCalendar()); };
+    });
+    el.addEventListener("mouseleave", () => { setTimeout(() => { if (!tip.matches(":hover")) hideTip(); }, 140); });
+  });
+  tip.addEventListener("mouseleave", hideTip);
+
+  // Day cells: accept drops (a new job from the rail, or an existing block being moved).
+  $("ic-grid").querySelectorAll(".ic-daycell").forEach((cell) => {
+    cell.addEventListener("dragover", (e) => { if (icDrag) { e.preventDefault(); cell.classList.add("drop-hot"); } });
+    cell.addEventListener("dragleave", () => cell.classList.remove("drop-hot"));
+    cell.addEventListener("drop", (e) => {
+      e.preventDefault(); cell.classList.remove("drop-hot");
+      const day = cell.getAttribute("data-day"); const drag = icDrag; icDrag = null; if (!drag) return;
+      if (drag.type === "new") {
+        const j = drag.job;
+        openPopover(e.clientX, e.clientY, { mode: "new", dayDate: day, title: (j.customer_name || "?") + (j.job_number ? " · #" + j.job_number : ""), hcp_job_id: j.hcp_job_id, crewId: (installers[0] && installers[0].id) || "", time: "08:00" });
+      } else if (drag.type === "move") {
+        const a = drag.asg;
+        openPopover(e.clientX, e.clientY, { mode: "move", dayDate: day, title: (a.customer_name || "?") + (a.job_number ? " · #" + a.job_number : ""), assignment_id: a.id, crewId: a.installer_id, time: clockHHMM(a.scheduled_start) });
+      }
+    });
+  });
+
+  // Slide-out Unscheduled rail (the far-left column). Opens on demand via the toolbar button.
   $("ic-poolN").textContent = `(${installs.length})`;
-  const poolEl = $("ic-pool");
-  poolEl.innerHTML = installs.length ? installs.map((p, ix) => `<div class="card" style="padding:9px 12px;margin-bottom:7px">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
-        <div><b>${esc(p.customer_name || "?")}</b> <span class="muted" style="font-size:12px">Job #${esc(p.job_number || "")} &middot; ${esc(p.address || "")}</span></div>
-        <button class="btn" data-assign="${ix}" style="padding:4px 12px;font-size:12px">Assign &#9662;</button>
-      </div>
-      <div id="ic-form-${ix}" style="display:none;margin-top:8px;gap:6px;flex-wrap:wrap;align-items:center">
-        <select id="ic-who-${ix}" style="padding:9px;border-radius:8px;background:var(--bg);color:var(--text);border:1px solid var(--line)">${installers.map((w) => `<option value="${esc(w.id)}">${esc(w.name)}${w.sub ? " (sub)" : ""}</option>`).join("")}</select>
-        <input type="date" id="ic-date-${ix}" value="${esc(calAnchor)}" style="padding:9px;border-radius:8px;background:var(--bg);color:var(--text);border:1px solid var(--line)"/>
-        <input type="time" id="ic-time-${ix}" value="08:00" style="padding:9px;border-radius:8px;background:var(--bg);color:var(--text);border:1px solid var(--line)"/>
-        <button class="btn primary" data-go="${ix}" style="padding:9px 14px;font-size:13px">Schedule</button>
-      </div>
-    </div>`).join("") : `<div class="muted">Nothing waiting — every install is scheduled. &#127881;</div>`;
-  poolEl.querySelectorAll("[data-assign]").forEach((b) => b.addEventListener("click", () => { const f = $("ic-form-" + b.getAttribute("data-assign")); f.style.display = f.style.display === "none" ? "flex" : "none"; }));
-  poolEl.querySelectorAll("[data-go]").forEach((b) => b.addEventListener("click", async () => {
-    const ix = b.getAttribute("data-go"), p = installs[ix];
-    const who = $("ic-who-" + ix).value, date = $("ic-date-" + ix).value, time = $("ic-time-" + ix).value;
-    if (!who || !date || !time) { alert("Pick a crew, date, and time."); return; }
-    b.disabled = true; b.textContent = "Scheduling…";
-    const r = await idApi("assign", { hcp_job_id: p.hcp_job_id, installer_id: who, scheduled_start: `${date}T${time}:00-05:00` });
-    if (r && r.ok) renderInstallCalendar(); else { b.disabled = false; b.textContent = "Schedule"; alert("Failed: " + ((r && r.error) || "error")); }
-  }));
+  const rail = document.createElement("div"); rail.className = "ic-rail";
+  rail.innerHTML = `<div class="ic-rail-hd"><span>&#128229; Unscheduled (${installs.length})</span><button class="btn" id="ic-railclose" style="padding:2px 10px">&times;</button></div>
+    <div class="ic-rail-body">${installs.length ? installs.map((p, ix) => `<div class="card ic-railcard" draggable="true" data-pool="${ix}" style="padding:9px 11px;margin-bottom:8px"><b>${esc(p.customer_name || "?")}</b><div class="muted" style="font-size:12px">${p.job_number ? "#" + esc(p.job_number) + " &middot; " : ""}${esc(p.address || "")}</div><div class="muted" style="font-size:11px;margin-top:3px">&#8597; Drag onto a day</div></div>`).join("") : `<div class="muted" style="padding:8px">Nothing waiting — every install is scheduled. &#127881;</div>`}</div>`;
+  document.body.appendChild(rail);
+  $("ic-railbtn").onclick = () => rail.classList.toggle("open");
+  rail.querySelector("#ic-railclose").onclick = () => rail.classList.remove("open");
+  rail.querySelectorAll(".ic-railcard").forEach((el) => {
+    const p = installs[el.getAttribute("data-pool")];
+    el.addEventListener("dragstart", () => { icDrag = { type: "new", job: p }; hideTip(); });
+    el.addEventListener("dragend", () => { icDrag = null; });
+  });
 }
 
 function renderDashboard() {
