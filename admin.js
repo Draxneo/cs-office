@@ -148,6 +148,7 @@ function render(pane) {
   if (pane === "pricebook") return renderPricebook();
   if (pane === "apilog") return renderApiLog();
   if (pane === "callsearch") return renderCallSearch();
+  if (pane === "tracking") return renderTracking();
   if (pane === "installs") return renderInstalls();
   if (pane === "installtodo") return renderInstallTodo();
 }
@@ -2562,4 +2563,114 @@ async function renderLeads() {
   rec.innerHTML = leads.length
     ? `<table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr style="text-align:left;opacity:.7"><th style="padding:4px">When</th><th>Name</th><th>Phone</th><th>Source</th><th>Message</th></tr></thead><tbody>${leads.map((l) => `<tr style="border-top:1px solid var(--line)"><td style="padding:4px;white-space:nowrap">${new Date(l.created_at).toLocaleString()}</td><td>${esc(l.name || "")}</td><td>${esc(l.phone || "")}</td><td>${esc(l.source || "")}</td><td>${esc(String(l.message || "").slice(0, 60))}</td></tr>`).join("")}</tbody></table>`
     : `<div class="muted">No leads yet. Once your partner posts one, it shows here and in the Inbox.</div>`;
+}
+
+// ---- Ad Tracking — call attribution: Twilio number -> ad source (2026-07-07) ----
+// Each inbound number gets labeled with the ad it appears on. The attribution-sweep
+// worker (backend, on cron) then tags HCP jobs "Src: <source>" based on the customer's
+// FIRST inbound call. This pane manages the number map (admin-hub tracking_list /
+// tracking_save) and can preview/run the sweep by hand (tracking_sweep).
+function fmtTrackPhone(p) {
+  var m = String(p || "").match(/^\+1(\d{3})(\d{3})(\d{4})$/);
+  return m ? "(" + m[1] + ") " + m[2] + "-" + m[3] : String(p || "");
+}
+async function renderTracking() {
+  var m = $("main");
+  m.innerHTML = '<h2 class="sec">Ad Tracking</h2><p class="sub">Loading…</p>';
+  var d = await hub("tracking_list");
+  if (!d || d.error) { m.innerHTML = '<h2 class="sec">Ad Tracking</h2><p class="sub">Failed to load: ' + esc((d && d.error) || "no response") + '</p>'; return; }
+  var nums = d.numbers || [];
+  var srcChips = Object.keys(d.tagged_by_source || {}).map(function (k) {
+    return '<div class="stat"><b>' + esc(String(d.tagged_by_source[k])) + '</b><span>' + esc(k) + '</span></div>';
+  }).join("") || '<span class="muted">No jobs tagged yet.</span>';
+
+  m.innerHTML = ''
+    + '<h2 class="sec">Ad Tracking</h2>'
+    + '<p class="sub">Mark which ad each phone number belongs to. When a customer’s <b>first call</b> came in on a labeled number, their Housecall Pro jobs are automatically tagged <b>Src: (source)</b> — so you can see which ads actually make the phone ring. Numbers without a source are left alone.</p>'
+    + '<div class="card"><h3>Your numbers</h3>'
+    + '<table><thead><tr><th>Number</th><th>Calls</th><th>Label (for you)</th><th>Ad source (goes on the job tag)</th><th>Main line</th><th>Active</th><th></th></tr></thead><tbody>'
+    + nums.map(function (n, i) {
+        return '<tr data-i="' + i + '">'
+          + '<td style="white-space:nowrap"><b>' + esc(fmtTrackPhone(n.phone_number)) + '</b></td>'
+          + '<td>' + esc(String(n.inbound_calls || 0)) + '</td>'
+          + '<td><input type="text" id="tn-label-' + i + '" value="' + esc(n.label || "") + '" placeholder="e.g. Google Ads campaign"/></td>'
+          + '<td><input type="text" id="tn-src-' + i + '" value="' + esc(n.ad_source || "") + '" placeholder="e.g. Google Ads"/></td>'
+          + '<td style="text-align:center"><input type="checkbox" id="tn-main-' + i + '"' + (n.is_main_line ? " checked" : "") + '/></td>'
+          + '<td style="text-align:center"><input type="checkbox" id="tn-act-' + i + '"' + (n.active !== false ? " checked" : "") + '/></td>'
+          + '<td><button class="btn" id="tn-save-' + i + '" style="width:auto">Save</button></td>'
+          + '</tr>';
+      }).join("")
+    + '</tbody></table>'
+    + '<div class="muted" style="font-size:12px;margin-top:8px">Main line = your regular business number; callers there get <b>no</b> ad tag. Leave “Ad source” blank to keep a number unattributed.</div>'
+    + '<div class="out" id="tn-out"></div></div>'
+    + '<div class="card"><h3>Add a number</h3>'
+    + '<p class="muted" style="font-size:12px;margin:0 0 8px">For brand-new Twilio numbers that haven’t received a call yet (they auto-appear here after their first call).</p>'
+    + '<div class="row2"><div><label>Phone number</label><input type="text" id="tn-new-phone" placeholder="(210) 555-1234"/></div>'
+    + '<div><label>Label</label><input type="text" id="tn-new-label" placeholder="e.g. Yelp profile"/></div>'
+    + '<div><label>Ad source</label><input type="text" id="tn-new-src" placeholder="e.g. Yelp"/></div></div>'
+    + '<div class="saverow"><button class="btn primary" id="tn-add" style="width:auto">Add number</button></div>'
+    + '<div class="out" id="tn-add-out"></div></div>'
+    + '<div class="card"><h3>Tagging</h3>'
+    + '<p class="muted" style="font-size:12px;margin:0 0 8px">The sweep runs automatically every 15 minutes. You can also run it by hand — Preview shows what WOULD be tagged without touching Housecall.</p>'
+    + '<div class="saverow"><button class="btn" id="tn-preview" style="width:auto">🔍 Preview (no changes)</button>'
+    + '<button class="btn primary" id="tn-run" style="width:auto">▶ Tag jobs now</button></div>'
+    + '<div class="out" id="tn-sweep-out"></div>'
+    + '<div class="tilegroup">Jobs tagged so far</div><div class="statgrid">' + srcChips + '</div>'
+    + '<div class="tilegroup">Recent activity</div><div id="tn-recent"></div></div>';
+
+  // per-row save -> admin-hub tracking_save (upsert by phone number)
+  nums.forEach(function (n, i) {
+    $("tn-save-" + i).onclick = async function () {
+      var btn = $("tn-save-" + i); btn.disabled = true; btn.textContent = "Saving…";
+      var r = await hub("tracking_save", {
+        phone_number: n.phone_number,
+        label: $("tn-label-" + i).value.trim() || null,
+        ad_source: $("tn-src-" + i).value.trim() || null,
+        is_main_line: $("tn-main-" + i).checked,
+        active: $("tn-act-" + i).checked,
+        notes: n.notes || null,
+      });
+      btn.disabled = false; btn.textContent = "Save";
+      showOut("tn-out", (r && r.ok) ? ("Saved " + fmtTrackPhone(n.phone_number) + " ✓") : ("Save failed: " + ((r && r.error) || "error")));
+    };
+  });
+
+  // add a brand-new number
+  $("tn-add").onclick = async function () {
+    var r = await hub("tracking_save", {
+      phone_number: $("tn-new-phone").value,
+      label: $("tn-new-label").value.trim() || null,
+      ad_source: $("tn-new-src").value.trim() || null,
+      active: true,
+    });
+    if (r && r.ok) renderTracking(); else showOut("tn-add-out", "Add failed: " + ((r && r.error) || "error"));
+  };
+
+  // manual sweep: preview (dry-run, safe) or run for real (writes HCP tags)
+  var sweep = async function (dry) {
+    showOut("tn-sweep-out", dry ? "Previewing…" : "Tagging jobs in Housecall…");
+    var r = await hub("tracking_sweep", { dry_run: dry });
+    var s = (r && r.result) || {};
+    var lines = [];
+    lines.push((dry ? "PREVIEW — nothing was changed." : "DONE — tags written to Housecall.") + "  Jobs looked at: " + (s.examined || 0) + ", " + (dry ? "would tag" : "tagged") + ": " + (s.tagged || 0) + ", skipped: " + (s.skipped || 0) + (s.stopped ? ("\\nSTOPPED: " + s.stopped) : ""));
+    (s.results || []).forEach(function (x) {
+      if (x.tagged) lines.push("✓ job " + x.job + " → " + x.tagged);
+      else if (x.would_tag) lines.push("→ job " + x.job + " would get " + x.would_tag);
+      else if (x.skip) lines.push("– job " + x.job + ": " + x.skip);
+    });
+    showOut("tn-sweep-out", lines.join("\\n"));
+  };
+  $("tn-preview").onclick = function () { sweep(true); };
+  $("tn-run").onclick = function () { if (confirm("Tag matching jobs in Housecall Pro now?")) sweep(false); };
+
+  // recent ledger rows (what the sweep decided and why)
+  var rec = d.recent || [];
+  $("tn-recent").innerHTML = rec.length
+    ? '<table><thead><tr><th>When</th><th>Job</th><th>Result</th><th>Source</th><th>Why / detail</th></tr></thead><tbody>'
+      + rec.map(function (a) {
+          var pill = a.status === "tagged" ? '<span class="pill ok">tagged</span>' : ('<span class="pill">' + esc(a.status) + '</span>');
+          return '<tr><td style="white-space:nowrap">' + new Date(a.created_at).toLocaleString() + '</td><td>' + esc(String(a.hcp_job_id || "").slice(0, 12)) + '…</td><td>' + pill + '</td><td>' + esc(a.ad_source || "") + '</td><td class="muted">' + esc(String(a.detail || "").slice(0, 90)) + '</td></tr>';
+        }).join("")
+      + '</tbody></table>'
+    : '<span class="muted">Nothing yet — the sweep hasn’t examined any jobs.</span>';
 }
